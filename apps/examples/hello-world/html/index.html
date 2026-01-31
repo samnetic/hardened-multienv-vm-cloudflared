@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hello World - Production Blueprint</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 16px;
+            padding: 60px 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            text-align: center;
+            max-width: 600px;
+        }
+        h1 {
+            color: #667eea;
+            font-size: 3rem;
+            margin-bottom: 20px;
+        }
+        p {
+            color: #4a5568;
+            font-size: 1.2rem;
+            line-height: 1.8;
+            margin-bottom: 15px;
+        }
+        .badge {
+            display: inline-block;
+            background: #48bb78;
+            color: white;
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin: 20px 0;
+        }
+        .tech-stack {
+            margin-top: 40px;
+            padding-top: 40px;
+            border-top: 2px solid #e2e8f0;
+        }
+        .tech {
+            display: inline-block;
+            background: #f7fafc;
+            color: #4a5568;
+            padding: 6px 16px;
+            border-radius: 8px;
+            margin: 5px;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        .footer {
+            margin-top: 30px;
+            font-size: 0.9rem;
+            color: #718096;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎉 Hello World!</h1>
+        <p><strong>Congratulations!</strong></p>
+        <p>Your production-ready hosting blueprint is working correctly.</p>
+
+        <div class="badge">✓ Successfully Deployed</div>
+
+        <div class="tech-stack">
+            <p style="font-weight: 600; margin-bottom: 15px;">Technology Stack:</p>
+            <span class="tech">Cloudflare Tunnel</span>
+            <span class="tech">Caddy v2</span>
+            <span class="tech">Docker</span>
+            <span class="tech">Nginx</span>
+            <span class="tech">Ubuntu</span>
+        </div>
+
+        <div class="footer">
+            <p>If you can see this page, your setup is complete!</p>
+            <p>Next step: Deploy your own applications 🚀</p>
+        </div>
+    </div>
+</body>
+</html>

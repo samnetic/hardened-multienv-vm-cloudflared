@@ -1,0 +1,15 @@
+# === PRODUCTION ENVIRONMENT ===
+app.yourdomain.com {
+  reverse_proxy app-production:80
+}
+
+# === STAGING ENVIRONMENT ===
+staging.app.yourdomain.com {
+  reverse_proxy app-staging:80
+}
+
+# === LOCAL DEVELOPMENT ===
+# Using http:// stops Caddy from trying to get a real SSL cert
+http://app.local {
+  reverse_proxy app-local:80
+}

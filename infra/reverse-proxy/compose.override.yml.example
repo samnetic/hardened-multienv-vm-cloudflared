@@ -1,0 +1,26 @@
+# =================================================================
+# Docker Compose Override - Local Development Example
+# =================================================================
+# Copy this file to 'compose.override.yml' for local development
+# This file is automatically loaded by Docker Compose v2
+# =================================================================
+
+services:
+  caddy:
+    # Override: Use local Caddyfile for testing
+    volumes:
+      - ./Caddyfile.local:/etc/caddy/Caddyfile:ro
+
+    # Override: Add local-web network for dev containers
+    networks:
+      - staging-web
+      - prod-web
+      - local-web
+
+    # Override: Expose admin API for debugging (REMOVE IN PRODUCTION!)
+    environment:
+      - CADDY_ADMIN=0.0.0.0:2019
+
+networks:
+  local-web:
+    external: true

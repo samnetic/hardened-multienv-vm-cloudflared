@@ -1,0 +1,27 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    # This is key: it connects to networks created by other compose files
+    networks:
+      - staging-web
+      - prod-web
+      - local-web # We add a network for local testing
+
+volumes:
+  caddy_data:
+
+networks:
+  staging-web:
+    external: true
+  prod-web:
+    external: true
+  local-web:
+    external: true

@@ -1,0 +1,89 @@
+# =================================================================
+# VM Maintenance Cron Jobs
+# =================================================================
+# Copy to: /etc/cron.d/vm-maintenance
+# Check: sudo run-parts --test /etc/cron.d/
+# =================================================================
+# Format: minute hour day month weekday user command
+# =================================================================
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# ===========================================
+# CRITICAL: Security & Updates
+# ===========================================
+
+# Run unattended upgrades check (daily at 2:00 AM)
+0 2 * * * root /usr/bin/unattended-upgrade -d >> /var/log/unattended-upgrades/unattended-upgrades.log 2>&1
+
+# Update package lists (daily at 1:30 AM)
+30 1 * * * root /usr/bin/apt-get update -qq
+
+# ===========================================
+# CRITICAL: Log Management
+# ===========================================
+
+# Clean up old journal entries - keep 30 days (weekly Sunday 4:00 AM)
+0 4 * * 0 root /usr/bin/journalctl --vacuum-time=30d --vacuum-size=500M > /dev/null 2>&1
+
+# Rotate and clean logs (handled by logrotate, but double-check weekly)
+0 5 * * 0 root /usr/sbin/logrotate -f /etc/logrotate.conf > /dev/null 2>&1
+
+# ===========================================
+# RECOMMENDED: Docker Maintenance
+# ===========================================
+
+# Prune unused Docker resources (weekly Sunday 3:00 AM)
+0 3 * * 0 root /usr/bin/docker system prune -f >> /var/log/docker-maintenance.log 2>&1
+
+# Prune dangling images (daily 4:30 AM)
+30 4 * * * root /usr/bin/docker image prune -f >> /var/log/docker-maintenance.log 2>&1
+
+# Clean up Docker build cache older than 7 days (weekly Sunday 3:30 AM)
+30 3 * * 0 root /usr/bin/docker builder prune -f --filter "until=168h" >> /var/log/docker-maintenance.log 2>&1
+
+# ===========================================
+# RECOMMENDED: System Health Checks
+# ===========================================
+
+# Disk usage check - alert if over 85% (daily 6:00 AM)
+# Note: setup-vm.sh copies this script to /opt/scripts/check-disk-usage.sh
+0 6 * * * root test -x /opt/scripts/check-disk-usage.sh && /opt/scripts/check-disk-usage.sh 2>&1 | logger -t disk-check
+
+# fail2ban status check (daily 7:00 AM)
+0 7 * * * root /usr/bin/fail2ban-client status >> /var/log/fail2ban-daily.log 2>&1
+
+# Check for zombie processes (daily 8:00 AM)
+0 8 * * * root ps aux | awk '$8 ~ /^Z/ { print }' | logger -t zombie-check
+
+# ===========================================
+# OPTIONAL: Security Auditing
+# ===========================================
+
+# AIDE integrity check (weekly Sunday 1:00 AM)
+# Uncomment after initializing AIDE with: sudo aideinit
+# 0 1 * * 0 root /usr/bin/aide --check > /var/log/aide/aide-weekly.log 2>&1
+
+# Check for unauthorized SUID/SGID files (weekly Sunday 2:00 AM)
+0 2 * * 0 root find / -type f \( -perm -4000 -o -perm -2000 \) -exec ls -la {} \; 2>/dev/null | logger -t suid-check
+
+# ===========================================
+# OPTIONAL: Backups
+# ===========================================
+# To enable: copy scripts to /opt/scripts/ or use full path to repo scripts
+# Example: cp /opt/hosting-blueprint/scripts/maintenance/backup-volumes.sh /opt/scripts/
+
+# Volume backup (daily 2:00 AM) - uncomment and customize path
+# 0 2 * * * root /opt/hosting-blueprint/scripts/maintenance/backup-volumes.sh >> /var/log/backup.log 2>&1
+
+# Configuration backup (weekly Sunday 6:00 AM) - create this script or customize
+# 0 6 * * 0 root /opt/scripts/backup-configs.sh >> /var/log/backup.log 2>&1
+
+# ===========================================
+# CLEANUP OLD LOG FILES
+# ===========================================
+
+# Remove log files older than 30 days (monthly 1st at 5:00 AM)
+0 5 1 * * root find /var/log -type f -name "*.log.*" -mtime +30 -delete 2>/dev/null
+0 5 1 * * root find /var/log -type f -name "*.gz" -mtime +30 -delete 2>/dev/null

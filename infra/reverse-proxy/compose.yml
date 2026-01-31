@@ -1,0 +1,109 @@
+# =================================================================
+# Caddy Reverse Proxy - Docker Compose Configuration
+# =================================================================
+# Modern Docker Compose v2 syntax (NO version field needed)
+# Cloudflare Tunnel handles HTTPS; Caddy runs HTTP only
+# =================================================================
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+
+    # =================================================================
+    # Security Hardening (2025 Standards)
+    # =================================================================
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE  # Required to bind to ports 80 and 443
+    read_only: false  # Caddy needs to write data (certs, config)
+
+    # =================================================================
+    # Resource Limits (Prevent abuse)
+    # =================================================================
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+    # =================================================================
+    # Health Check
+    # =================================================================
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # =================================================================
+    # Environment Variables
+    # =================================================================
+    environment:
+      # Used if you add Cloudflare DNS plugin (optional)
+      # - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
+
+      # Domain for configuration
+      - DOMAIN=${DOMAIN:-yourdomain.com}
+
+    # =================================================================
+    # Ports (HTTP only - tunnel handles HTTPS)
+    # =================================================================
+    ports:
+      - "80:80"
+      # Optional: Enable if you want direct HTTPS access (not recommended with tunnel)
+      # - "443:443"
+      # - "443:443/udp"  # HTTP/3 (QUIC)
+
+    # =================================================================
+    # Volumes
+    # =================================================================
+    volumes:
+      # Caddyfile (read-only)
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+
+      # Data persistence (certificates if using HTTPS directly)
+      - caddy_data:/data
+
+      # Configuration persistence
+      - caddy_config:/config
+
+    # =================================================================
+    # Networks
+    # =================================================================
+    networks:
+      - dev-web
+      - staging-web
+      - prod-web
+      # Uncomment if you want Caddy metrics in Prometheus
+      # - monitoring
+
+# =================================================================
+# Volumes
+# =================================================================
+volumes:
+  caddy_data:
+    name: caddy_data
+  caddy_config:
+    name: caddy_config
+
+# =================================================================
+# Networks (External - created via scripts/create-networks.sh)
+# =================================================================
+networks:
+  dev-web:
+    external: true
+  staging-web:
+    external: true
+  prod-web:
+    external: true
+  # monitoring:
+  #   external: true

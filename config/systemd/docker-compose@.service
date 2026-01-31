@@ -1,0 +1,81 @@
+# =================================================================
+# Docker Compose Application Service Template
+# =================================================================
+# This is a systemd template service for auto-starting Docker Compose
+# applications on VM boot.
+#
+# Installation (done automatically by setup-vm.sh):
+#   sudo cp docker-compose@.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#
+# Usage:
+#   sudo systemctl enable docker-compose@dev
+#   sudo systemctl enable docker-compose@staging
+#   sudo systemctl enable docker-compose@production
+#
+# This will auto-start apps in /srv/apps/{dev,staging,production}
+# on system boot.
+#
+# Manual control:
+#   sudo systemctl start docker-compose@production
+#   sudo systemctl stop docker-compose@staging
+#   sudo systemctl status docker-compose@dev
+# =================================================================
+
+[Unit]
+Description=Docker Compose Application - %i environment
+Documentation=https://docs.docker.com/compose/
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/srv/apps/%i
+
+# Start all compose services in the environment directory (with logging)
+ExecStart=/bin/bash -c '\
+  for d in /srv/apps/%i/*/; do \
+    if [ -f "$d/compose.yml" ]; then \
+      logger -t docker-compose@%i "Starting: $d"; \
+      if /usr/bin/docker compose -f "$d/compose.yml" up -d; then \
+        logger -t docker-compose@%i "Started successfully: $d"; \
+      else \
+        logger -t docker-compose@%i -p user.err "FAILED to start: $d"; \
+      fi; \
+    fi; \
+  done'
+
+# Stop all compose services gracefully (with logging)
+ExecStop=/bin/bash -c '\
+  for d in /srv/apps/%i/*/; do \
+    if [ -f "$d/compose.yml" ]; then \
+      logger -t docker-compose@%i "Stopping: $d"; \
+      /usr/bin/docker compose -f "$d/compose.yml" down; \
+    fi; \
+  done; \
+  logger -t docker-compose@%i "All services stopped"'
+
+# Reload/restart (useful after config changes, with logging)
+ExecReload=/bin/bash -c '\
+  for d in /srv/apps/%i/*/; do \
+    if [ -f "$d/compose.yml" ]; then \
+      logger -t docker-compose@%i "Reloading: $d"; \
+      /usr/bin/docker compose -f "$d/compose.yml" up -d --force-recreate; \
+    fi; \
+  done; \
+  logger -t docker-compose@%i "Reload complete"'
+
+# Timeout for starting all containers (increase if you have many apps)
+TimeoutStartSec=300
+
+# Timeout for stopping containers
+TimeoutStopSec=120
+
+# Run as root (required for Docker)
+User=root
+Group=docker
+
+[Install]
+WantedBy=multi-user.target

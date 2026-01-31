@@ -1,0 +1,79 @@
+# =================================================================
+# Hello World Example - Static Nginx Site
+# =================================================================
+# Simple example showing basic Docker deployment with 2025 security
+# =================================================================
+
+services:
+  app:
+    # Simple nginx image serving plaintext responses
+    image: nginxdemos/hello:plain-text
+
+    # Container name from environment variable
+    container_name: app-${ENVIRONMENT}
+
+    restart: unless-stopped
+
+    # =================================================================
+    # Security Hardening
+    # =================================================================
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE  # Nginx binds to port 80
+      - CHOWN
+      - SETGID
+      - SETUID
+
+    # =================================================================
+    # Resource Limits
+    # =================================================================
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          cpus: '0.1'
+          memory: 32M
+
+    # =================================================================
+    # Health Check
+    # =================================================================
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # =================================================================
+    # Networks
+    # =================================================================
+    # NOTE: Update the network name to match the one defined below
+    networks:
+      - staging-web  # <-- Change this to match your environment
+
+    # =================================================================
+    # Labels
+    # =================================================================
+    labels:
+      - "app.name=hello-world"
+      - "app.environment=${ENVIRONMENT}"
+      - "app.description=Simple nginx hello world"
+
+# =================================================================
+# Networks (External - created via scripts/create-networks.sh)
+# =================================================================
+# NOTE: Update the network name below to match your environment.
+# Docker Compose doesn't support variable interpolation in network keys.
+#
+# For dev:        use "dev-web"
+# For staging:    use "staging-web"
+# For production: use "prod-web"
+# =================================================================
+networks:
+  staging-web:  # <-- Change this to match your environment
+    external: true

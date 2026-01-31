@@ -1,0 +1,124 @@
+# =================================================================
+# Cloudflare Tunnel Configuration
+# =================================================================
+# REFERENCE IMPLEMENTATION - Shows all possible services
+#
+# This is a COMPLETE example showing various service types:
+#   - SSH access (required for CI/CD)
+#   - Admin panels with Access protection (n8n, monitoring)
+#   - Public webhooks
+#   - Web apps (dev, staging, production)
+#
+# MINIMUM REQUIRED for basic setup:
+#   1. ssh.yourdomain.com → ssh://localhost:22
+#   2. *.yourdomain.com → http://localhost:80 (Caddy handles routing)
+#   3. Catch-all 404
+#
+# Remove or comment out services you don't use (n8n, monitoring, etc.)
+# =================================================================
+# Place this file at: /etc/cloudflared/config.yml
+# =================================================================
+
+# Your tunnel UUID (get this from: cloudflared tunnel create <name>)
+tunnel: YOUR_TUNNEL_UUID
+
+# Credentials file location (created automatically during tunnel creation)
+credentials-file: /root/.cloudflared/YOUR_TUNNEL_UUID.json
+
+# =================================================================
+# Ingress Rules (Order matters! First match wins)
+# =================================================================
+# ACCESS PROTECTION: Configure in Cloudflare Zero Trust dashboard
+# See docs/14-cloudflare-zero-trust.md for setup guide
+# =================================================================
+ingress:
+  # -----------------------------------------------------------------
+  # SSH - Service token auth for CI/CD
+  # Access Policy: Service Auth (allow github-actions service token)
+  # -----------------------------------------------------------------
+  - hostname: ssh.yourdomain.com
+    service: ssh://localhost:22
+
+  # -----------------------------------------------------------------
+  # Admin panels - REQUIRE LOGIN
+  # Access Policy: Allow (emails ending in @yourcompany.com OR OTP)
+  # -----------------------------------------------------------------
+  # n8n Editor UI (protected)
+  - hostname: n8n.yourdomain.com
+    service: http://localhost:5678
+
+  # Monitoring dashboard (protected)
+  - hostname: monitoring.yourdomain.com
+    service: http://localhost:19999
+
+  # -----------------------------------------------------------------
+  # Webhooks - PUBLIC (no Access policy)
+  # Do NOT create an Access application for these
+  # -----------------------------------------------------------------
+  - hostname: hooks.yourdomain.com
+    service: http://localhost:5678
+
+  # -----------------------------------------------------------------
+  # Dev/Staging - REQUIRE LOGIN (team only)
+  # Access Policy: Allow (team members only)
+  # -----------------------------------------------------------------
+  - hostname: dev-app.yourdomain.com
+    service: http://localhost:80
+
+  - hostname: staging-app.yourdomain.com
+    service: http://localhost:80
+
+  # -----------------------------------------------------------------
+  # Production app - Your choice
+  # No Access = public, with Access = protected
+  # -----------------------------------------------------------------
+  - hostname: app.yourdomain.com
+    service: http://localhost:80
+
+  - hostname: yourdomain.com
+    service: http://localhost:80
+
+  - hostname: www.yourdomain.com
+    service: http://localhost:80
+
+  # -----------------------------------------------------------------
+  # Catch-all (returns 404 for unconfigured subdomains)
+  # -----------------------------------------------------------------
+  - service: http_status:404
+
+# =================================================================
+# Protocol Configuration
+# =================================================================
+# Prefer QUIC (faster), fallback to HTTP/2
+protocol: quic
+
+# =================================================================
+# Logging
+# =================================================================
+loglevel: info
+# Options: debug, info, warn, error, fatal
+
+# =================================================================
+# Optional: Metrics (for Prometheus)
+# =================================================================
+# metrics: localhost:9090
+
+# =================================================================
+# Access Protection Summary
+# =================================================================
+# Protected (require login):
+#   - n8n.yourdomain.com
+#   - monitoring.yourdomain.com
+#   - dev-app.yourdomain.com
+#   - staging-app.yourdomain.com
+#
+# Public (no Access):
+#   - hooks.yourdomain.com (webhooks)
+#   - app.yourdomain.com (your choice)
+#
+# Service Token:
+#   - ssh.yourdomain.com (CI/CD)
+#
+# Configure Access policies at:
+#   https://one.dash.cloudflare.com → Access → Applications
+# =================================================================

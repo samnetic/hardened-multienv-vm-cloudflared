@@ -1,0 +1,160 @@
+# =================================================================
+# App Template - Docker Compose Configuration
+# =================================================================
+# Modern Docker Compose v2 syntax with 2025 security standards
+# Uses file-based secrets pattern (same security as Docker Swarm)
+# Copy this template for your own apps
+# =================================================================
+
+services:
+  app:
+    # Your app image
+    image: your-app:latest
+    # Or build from Dockerfile
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+
+    # Container name (uses environment variable)
+    container_name: app-${ENVIRONMENT}
+
+    # Restart policy
+    restart: unless-stopped
+
+    # =================================================================
+    # Security Hardening (2025 Standards)
+    # =================================================================
+    security_opt:
+      # Prevent privilege escalation
+      - no-new-privileges:true
+
+    # Drop ALL Linux capabilities, then add only what's needed
+    cap_drop:
+      - ALL
+    # Uncomment capabilities your app actually needs:
+    # cap_add:
+    #   - NET_BIND_SERVICE  # Bind to ports < 1024
+    #   - CHOWN             # Change file ownership
+    #   - SETGID            # Change GID
+    #   - SETUID            # Change UID
+
+    # Read-only filesystem (if app doesn't write to filesystem)
+    # Set to true for maximum security if possible
+    read_only: false
+
+    # If read_only is true, add tmpfs for writable temp space
+    # tmpfs:
+    #   - /tmp
+    #   - /var/run
+
+    # =================================================================
+    # Resource Limits (Prevent abuse)
+    # =================================================================
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'      # Max 1 CPU core
+          memory: 512M      # Max 512MB RAM
+        reservations:
+          cpus: '0.25'      # Reserved 0.25 CPU
+          memory: 128M      # Reserved 128MB RAM
+
+    # =================================================================
+    # Health Check
+    # =================================================================
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${APP_PORT}/health"]
+      # Or for Node.js apps:
+      # test: ["CMD", "node", "-e", "require('http').get('http://localhost:${APP_PORT}/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # =================================================================
+    # Environment Variables
+    # =================================================================
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - PORT=${APP_PORT}
+      # Add your app-specific environment variables here
+      # - DATABASE_URL=${DATABASE_URL}
+
+      # =================================================================
+      # File-Based Secrets Pattern
+      # =================================================================
+      # Point to secret files mounted at /run/secrets/
+      # Your app reads the file content at startup
+      # This keeps secrets OUT of environment variables (more secure)
+      #
+      # Example: DATABASE_PASSWORD_FILE=/run/secrets/db_password
+      # Your app code: fs.readFileSync(process.env.DATABASE_PASSWORD_FILE, 'utf8').trim()
+      # =================================================================
+      - DATABASE_PASSWORD_FILE=/run/secrets/db_password
+      - API_KEY_FILE=/run/secrets/api_key
+      # - JWT_SECRET_FILE=/run/secrets/jwt_secret
+      # - SMTP_PASSWORD_FILE=/run/secrets/smtp_password
+
+    # Load additional variables from .env file
+    env_file:
+      - .env
+
+    # =================================================================
+    # Volumes - Including Secret Files
+    # =================================================================
+    volumes:
+      # =================================================================
+      # Secret files (from repo secrets/ directory)
+      # =================================================================
+      # Mount secrets as read-only files to /run/secrets/
+      # Create secrets with: ./scripts/secrets/create-secret.sh <env> <name>
+      # =================================================================
+      - ../../secrets/${ENVIRONMENT}/db_password.txt:/run/secrets/db_password:ro
+      - ../../secrets/${ENVIRONMENT}/api_key.txt:/run/secrets/api_key:ro
+      # - ../../secrets/${ENVIRONMENT}/jwt_secret.txt:/run/secrets/jwt_secret:ro
+      # - ../../secrets/${ENVIRONMENT}/smtp_password.txt:/run/secrets/smtp_password:ro
+
+      # =================================================================
+      # App data volumes (uncomment if needed)
+      # =================================================================
+      # - ./data:/app/data:rw
+      # - ./uploads:/app/uploads:rw
+
+    # =================================================================
+    # Networks
+    # =================================================================
+    # NOTE: Update the network name to match the one defined below
+    networks:
+      - staging-web  # <-- Change this to match your environment
+
+    # =================================================================
+    # Labels (for Prometheus monitoring - optional)
+    # =================================================================
+    labels:
+      - "app.name=${APP_NAME}"
+      - "app.environment=${ENVIRONMENT}"
+      # Uncomment if you want Prometheus to scrape this app
+      # - "prometheus.scrape=true"
+      # - "prometheus.port=${APP_PORT}"
+      # - "prometheus.path=/metrics"
+
+# =================================================================
+# Networks (External - created via scripts/create-networks.sh)
+# =================================================================
+# NOTE: Update the network name below to match your DOCKER_NETWORK env var.
+# Docker Compose doesn't support variable interpolation in network keys.
+#
+# For dev:        use "dev-web"
+# For staging:    use "staging-web"
+# For production: use "prod-web"
+# =================================================================
+networks:
+  staging-web:  # <-- Change this to match your environment
+    external: true
+
+# =================================================================
+# Volumes (if needed)
+# =================================================================
+# volumes:
+#   app_data:
+#     name: ${APP_NAME}_data

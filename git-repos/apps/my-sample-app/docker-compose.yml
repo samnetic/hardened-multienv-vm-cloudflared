@@ -1,0 +1,14 @@
+services:
+  app:
+    # Our simple, pre-built "hello world" application
+    image: nginxdemos/hello:plain-text
+    restart: unless-stopped
+    # The container name is set by an environment variable!
+    container_name: ${CONTAINER_NAME}
+    networks:
+      # The network it connects to is also set by a variable!
+      - ${DOCKER_NETWORK}
+
+networks:
+  ${DOCKER_NETWORK}:
+    external: true

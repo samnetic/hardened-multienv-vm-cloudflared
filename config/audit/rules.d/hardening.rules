@@ -1,0 +1,154 @@
+# =================================================================
+# Audit Rules for Security Monitoring
+# =================================================================
+# Copy to: /etc/audit/rules.d/hardening.rules
+# Apply: sudo augenrules --load
+# Check: sudo auditctl -l
+# =================================================================
+
+# Delete existing rules
+-D
+
+# Set buffer size (increase for high-traffic systems)
+-b 8192
+
+# Failure mode: 0=silent, 1=printk, 2=panic
+-f 1
+
+# ===========================================
+# CRITICAL FILE MONITORING
+# ===========================================
+
+# Monitor sudoers changes
+-w /etc/sudoers -p wa -k sudoers_changes
+-w /etc/sudoers.d/ -p wa -k sudoers_changes
+
+# Monitor SSH configuration
+-w /etc/ssh/sshd_config -p wa -k sshd_config
+-w /etc/ssh/sshd_config.d/ -p wa -k sshd_config
+
+# Monitor user/group files
+-w /etc/passwd -p wa -k passwd_changes
+-w /etc/shadow -p wa -k shadow_changes
+-w /etc/group -p wa -k group_changes
+-w /etc/gshadow -p wa -k gshadow_changes
+
+# Monitor security-sensitive configs
+-w /etc/hosts -p wa -k hosts_changes
+-w /etc/hostname -p wa -k hostname_changes
+-w /etc/hosts.allow -p wa -k hosts_allow_changes
+-w /etc/hosts.deny -p wa -k hosts_deny_changes
+
+# Monitor PAM configuration
+-w /etc/pam.d/ -p wa -k pam_changes
+
+# Monitor network configuration
+-w /etc/network/ -p wa -k network_changes
+-w /etc/netplan/ -p wa -k netplan_changes
+
+# ===========================================
+# DOCKER MONITORING
+# ===========================================
+
+# Monitor Docker daemon configuration
+-w /etc/docker/daemon.json -p wa -k docker_config
+
+# Monitor Docker service
+-w /lib/systemd/system/docker.service -p wa -k docker_service
+
+# Monitor docker socket access
+-w /var/run/docker.sock -p rwxa -k docker_socket
+
+# ===========================================
+# LOGIN/LOGOUT MONITORING
+# ===========================================
+
+# Monitor login files
+-w /var/log/auth.log -p wa -k auth_log
+-w /var/log/faillog -p wa -k faillog
+-w /var/log/lastlog -p wa -k lastlog
+-w /var/run/utmp -p wa -k session
+-w /var/log/wtmp -p wa -k logins
+-w /var/log/btmp -p wa -k failed_logins
+
+# ===========================================
+# SYSTEM CALL MONITORING
+# ===========================================
+
+# Monitor time changes
+-a always,exit -F arch=b64 -S adjtimex -S settimeofday -k time_change
+-a always,exit -F arch=b32 -S adjtimex -S settimeofday -S stime -k time_change
+
+# Monitor hostname changes
+-a always,exit -F arch=b64 -S sethostname -S setdomainname -k hostname_change
+-a always,exit -F arch=b32 -S sethostname -S setdomainname -k hostname_change
+
+# Monitor file deletion by users
+-a always,exit -F arch=b64 -S unlink -S unlinkat -S rename -S renameat -F auid>=1000 -F auid!=-1 -k file_deletion
+-a always,exit -F arch=b32 -S unlink -S unlinkat -S rename -S renameat -F auid>=1000 -F auid!=-1 -k file_deletion
+
+# Monitor module loading
+-w /sbin/insmod -p x -k module_insertion
+-w /sbin/rmmod -p x -k module_removal
+-w /sbin/modprobe -p x -k module_load
+
+# Monitor mount operations
+-a always,exit -F arch=b64 -S mount -F auid>=1000 -F auid!=-1 -k mount_operations
+-a always,exit -F arch=b32 -S mount -F auid>=1000 -F auid!=-1 -k mount_operations
+
+# ===========================================
+# PRIVILEGED COMMAND MONITORING
+# ===========================================
+
+# Monitor su usage
+-a always,exit -F path=/bin/su -F perm=x -F auid>=1000 -F auid!=-1 -k privileged_su
+
+# Monitor sudo usage
+-a always,exit -F path=/usr/bin/sudo -F perm=x -F auid>=1000 -F auid!=-1 -k privileged_sudo
+
+# Monitor passwd command
+-a always,exit -F path=/usr/bin/passwd -F perm=x -F auid>=1000 -F auid!=-1 -k privileged_passwd
+
+# Monitor user management commands
+-a always,exit -F path=/usr/sbin/useradd -F perm=x -F auid>=1000 -F auid!=-1 -k user_modification
+-a always,exit -F path=/usr/sbin/userdel -F perm=x -F auid>=1000 -F auid!=-1 -k user_modification
+-a always,exit -F path=/usr/sbin/usermod -F perm=x -F auid>=1000 -F auid!=-1 -k user_modification
+-a always,exit -F path=/usr/sbin/groupadd -F perm=x -F auid>=1000 -F auid!=-1 -k group_modification
+-a always,exit -F path=/usr/sbin/groupdel -F perm=x -F auid>=1000 -F auid!=-1 -k group_modification
+-a always,exit -F path=/usr/sbin/groupmod -F perm=x -F auid>=1000 -F auid!=-1 -k group_modification
+
+# ===========================================
+# FIREWALL MONITORING
+# ===========================================
+
+# Monitor UFW configuration changes
+-w /etc/ufw/ -p wa -k firewall_changes
+-w /etc/default/ufw -p wa -k firewall_changes
+
+# ===========================================
+# MAKE RULES IMMUTABLE (PRODUCTION ONLY)
+# ===========================================
+#
+# ┌──────────────────────────────────────────────────────────────────┐
+# │ IMPORTANT: Audit Rules Immutability                              │
+# │                                                                  │
+# │ Uncommenting "-e 2" below makes audit rules IMMUTABLE:           │
+# │   - Rules CANNOT be changed by root without a reboot             │
+# │   - Prevents attackers from disabling auditing                   │
+# │   - STRONGLY RECOMMENDED for production systems                  │
+# │                                                                  │
+# │ TO ENABLE:                                                       │
+# │   Option 1: Run scripts/security/enable-audit-immutability.sh   │
+# │   Option 2: Manually uncomment "-e 2" below and reboot          │
+# │                                                                  │
+# │ BEFORE ENABLING:                                                 │
+# │   1. Verify all rules work: sudo auditctl -l                    │
+# │   2. Review audit log: sudo ausearch -m avc -ts recent          │
+# │   3. Schedule a maintenance window (reboot required)            │
+# │                                                                  │
+# │ AFTER ENABLING:                                                  │
+# │   - ANY audit rule changes require a REBOOT                     │
+# │   - Keep this in mind during incident response                  │
+# └──────────────────────────────────────────────────────────────────┘
+#
+# -e 2

@@ -1,0 +1,63 @@
+# Secrets and credentials
+secrets/dev/*.txt
+secrets/staging/*.txt
+secrets/production/*.txt
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+credentials.json
+.cloudflared/
+
+# Environment files with secrets
+.env.local
+.env.*.local
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Node modules (if any)
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+env/
+venv/
+ENV/
+
+# Docker
+.dockerignore.local
+
+# OS files
+Thumbs.db
+.Spotlight-V100
+.Trashes
+
+# Backup files
+*.backup
+*.bak
+*~
+
+# Local configuration (user-specific)
+/opt/vm-config/
+
+# Plan files (local only)
+.claude/

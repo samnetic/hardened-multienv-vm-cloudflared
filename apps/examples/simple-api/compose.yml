@@ -1,0 +1,93 @@
+# =================================================================
+# Simple API Example - Node.js Express
+# =================================================================
+# Demonstrates building custom Docker image with health checks
+# =================================================================
+
+services:
+  app:
+    # Build from local Dockerfile
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: simple-api:${ENVIRONMENT}
+    container_name: app-${ENVIRONMENT}
+    restart: unless-stopped
+
+    # =================================================================
+    # Security Hardening (2025 Standards)
+    # =================================================================
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # No capabilities needed (runs on port > 1024)
+
+    # Read-only filesystem (Node.js app doesn't write files)
+    read_only: true
+    tmpfs:
+      - /tmp  # Writable temp space
+
+    # =================================================================
+    # Resource Limits
+    # =================================================================
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+    # =================================================================
+    # Health Check
+    # =================================================================
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    # =================================================================
+    # Environment Variables
+    # =================================================================
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - PORT=3000
+      - APP_NAME=${APP_NAME}
+      - ENVIRONMENT=${ENVIRONMENT}
+
+    env_file:
+      - .env
+
+    # =================================================================
+    # Networks
+    # =================================================================
+    # NOTE: Update the network name to match the one defined below
+    networks:
+      - staging-web  # <-- Change this to match your environment
+
+    # =================================================================
+    # Labels
+    # =================================================================
+    labels:
+      - "app.name=simple-api"
+      - "app.environment=${ENVIRONMENT}"
+      - "app.description=Simple Node.js Express API"
+
+# =================================================================
+# Networks (External - created via scripts/create-networks.sh)
+# =================================================================
+# NOTE: Update the network name below to match your environment.
+# Docker Compose doesn't support variable interpolation in network keys.
+#
+# For dev:        use "dev-web"
+# For staging:    use "staging-web"
+# For production: use "prod-web"
+# =================================================================
+networks:
+  staging-web:  # <-- Change this to match your environment
+    external: true

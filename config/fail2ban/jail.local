@@ -1,0 +1,114 @@
+# =================================================================
+# fail2ban Configuration
+# =================================================================
+# Copy to: /etc/fail2ban/jail.local
+# Apply: sudo systemctl restart fail2ban
+# Check: sudo fail2ban-client status
+# =================================================================
+
+[DEFAULT]
+# Default ban time (1 hour)
+bantime = 3600
+
+# Time window to count failures (10 minutes)
+findtime = 600
+
+# Max failures before ban
+maxretry = 5
+
+# IPs to never ban
+ignoreip = 127.0.0.1/8 ::1
+
+# Ban action
+banaction = ufw
+
+# Logging
+loglevel = INFO
+logtarget = /var/log/fail2ban.log
+
+# Email notifications (optional - uncomment and configure)
+# destemail = admin@example.com
+# sendername = Fail2Ban
+# mta = sendmail
+# action = %(action_mwl)s
+
+# ===========================================
+# SSH PROTECTION (CRITICAL)
+# ===========================================
+
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/auth.log
+
+# Stricter settings for SSH
+maxretry = 3
+findtime = 300
+bantime = 86400
+
+# Ban repeat offenders for longer
+# After 3 bans, ban for 1 week
+bantime.increment = true
+bantime.factor = 24
+bantime.maxtime = 604800
+
+# ===========================================
+# SSH DDoS PROTECTION
+# ===========================================
+
+[sshd-ddos]
+enabled = true
+port = ssh
+filter = sshd-ddos
+logpath = /var/log/auth.log
+maxretry = 10
+findtime = 60
+bantime = 3600
+
+# ===========================================
+# RECIDIVE - BAN REPEAT OFFENDERS
+# ===========================================
+
+[recidive]
+enabled = true
+filter = recidive
+logpath = /var/log/fail2ban.log
+action = ufw[name=recidive]
+# Ban for 1 week after being banned 3 times
+bantime = 604800
+findtime = 86400
+maxretry = 3
+
+# ===========================================
+# NGINX (if used)
+# ===========================================
+
+# [nginx-http-auth]
+# enabled = true
+# port = http,https
+# filter = nginx-http-auth
+# logpath = /var/log/nginx/error.log
+# maxretry = 5
+# bantime = 3600
+
+# [nginx-limit-req]
+# enabled = true
+# port = http,https
+# filter = nginx-limit-req
+# logpath = /var/log/nginx/error.log
+# maxretry = 10
+# findtime = 60
+# bantime = 7200
+
+# ===========================================
+# CADDY (if using Caddy logs)
+# ===========================================
+
+# Note: Caddy logs in JSON format, may need custom filter
+# [caddy-auth]
+# enabled = false
+# port = http,https
+# filter = caddy-auth
+# logpath = /data/logs/*-access.log
+# maxretry = 5

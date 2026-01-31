@@ -1,0 +1,209 @@
+# =================================================================
+# Caddyfile - HTTP Reverse Proxy for Cloudflare Tunnel
+# =================================================================
+# Cloudflare Tunnel handles HTTPS
+# Caddy runs HTTP-only and routes traffic to apps
+# =================================================================
+
+# =================================================================
+# Global Options
+# =================================================================
+{
+  # Disable automatic HTTPS (Cloudflare Tunnel handles it)
+  auto_https off
+
+  # Disable admin API for security (comment out for debugging)
+  admin off
+
+  # Optional: Enable for Prometheus metrics
+  # servers {
+  #   metrics
+  # }
+}
+
+# =================================================================
+# Reusable Snippets
+# =================================================================
+
+(security_headers) {
+  header {
+    # HSTS - Force HTTPS for 1 year
+    Strict-Transport-Security "max-age=31536000;"
+
+    # Prevent clickjacking
+    X-Frame-Options "DENY"
+
+    # Prevent MIME sniffing
+    X-Content-Type-Options "nosniff"
+
+    # Referrer policy
+    Referrer-Policy "strict-origin-when-cross-origin"
+
+    # Permissions policy (restrict browser features)
+    Permissions-Policy "geolocation=(), microphone=(), camera=()"
+
+    # Hide server header
+    -Server
+  }
+}
+
+(proxy_headers) {
+  header_up X-Real-IP {remote_host}
+  header_up X-Forwarded-For {remote_host}
+  header_up X-Forwarded-Proto https  # Tell app it's behind HTTPS
+  header_up X-Forwarded-Host {host}
+}
+
+# =================================================================
+# DEV ENVIRONMENT (Playground - for testing, can break things)
+# =================================================================
+# Dev apps accessible at dev-*.yourdomain.com
+# Backend services (databases) can be accessed from local PC
+# for local development with remote DB connections
+# =================================================================
+
+http://dev-app.yourdomain.com {
+  import security_headers
+
+  # Reverse proxy to dev app container
+  reverse_proxy app-dev:80 {
+    import proxy_headers
+  }
+
+  # Access logs
+  log {
+    output file /data/logs/dev-access.log {
+      roll_size 10mb
+      roll_keep 3
+    }
+    format json
+  }
+}
+
+# Example: Dev API
+# http://dev-api.yourdomain.com {
+#   import security_headers
+#   reverse_proxy api-dev:3000 {
+#     import proxy_headers
+#   }
+# }
+
+# =================================================================
+# STAGING ENVIRONMENT
+# =================================================================
+
+http://staging-app.yourdomain.com {
+  import security_headers
+
+  # Reverse proxy to staging app container
+  reverse_proxy app-staging:80 {
+    import proxy_headers
+
+    # Health check (optional)
+    # health_uri /health
+    # health_interval 30s
+    # health_timeout 10s
+  }
+
+  # Access logs
+  log {
+    output file /data/logs/staging-access.log {
+      roll_size 20mb
+      roll_keep 5
+    }
+    format json
+  }
+}
+
+# =================================================================
+# PRODUCTION ENVIRONMENT
+# =================================================================
+
+http://app.yourdomain.com {
+  import security_headers
+
+  # Reverse proxy to production app container
+  reverse_proxy app-production:80 {
+    import proxy_headers
+
+    # Health check (optional)
+    # health_uri /health
+    # health_interval 30s
+    # health_timeout 10s
+  }
+
+  # Access logs
+  log {
+    output file /data/logs/production-access.log {
+      roll_size 20mb
+      roll_keep 5
+    }
+    format json
+  }
+}
+
+# =================================================================
+# ADDITIONAL APPS (Examples - Uncomment as needed)
+# =================================================================
+
+# http://staging-api.yourdomain.com {
+#   import security_headers
+#   reverse_proxy api-staging:3000 {
+#     import proxy_headers
+#   }
+# }
+
+# http://api.yourdomain.com {
+#   import security_headers
+#   reverse_proxy api-production:3000 {
+#     import proxy_headers
+#   }
+# }
+
+# =================================================================
+# STATIC FILE SERVER (Example)
+# =================================================================
+# NOTE: Caddy v2 requires explicit file_server directive!
+#
+# http://static.yourdomain.com {
+#   import security_headers
+#   root * /srv/static
+#   file_server
+# }
+
+# =================================================================
+# MONITORING (Netdata) - Uncomment to enable
+# =================================================================
+# Access server metrics, Docker stats, security events
+# Recommend: Add Cloudflare Access policy to restrict access
+# =================================================================
+
+# http://monitoring.yourdomain.com {
+#   import security_headers
+#   reverse_proxy netdata:19999 {
+#     import proxy_headers
+#   }
+# }
+
+# =================================================================
+# BASE DOMAIN (No subdomain - redirect or landing page)
+# =================================================================
+
+http://yourdomain.com {
+  import security_headers
+
+  # Option 1: Redirect to www (uncomment if preferred)
+  # redir https://www.yourdomain.com{uri} permanent
+
+  # Option 2: Show landing page
+  respond "Welcome to yourdomain.com - Configure your apps at subdomains" 200
+}
+
+# =================================================================
+# WILDCARD CATCH-ALL (404 for unconfigured subdomains)
+# =================================================================
+
+http://*.yourdomain.com {
+  import security_headers
+  respond "This subdomain is not configured yet" 404
+}

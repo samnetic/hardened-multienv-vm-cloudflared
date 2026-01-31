@@ -1,0 +1,77 @@
+# =================================================================
+# Netdata - Real-time Monitoring
+# =================================================================
+# All-in-one monitoring: system metrics, Docker, security events
+#
+# Access: http://monitoring.yourdomain.com (add to Caddyfile)
+# Or locally: http://localhost:19999
+# =================================================================
+
+services:
+  netdata:
+    image: netdata/netdata:stable
+    container_name: netdata
+    hostname: ${HOSTNAME:-myserver}
+    restart: unless-stopped
+
+    # Security hardening: drop all caps, add back only what's needed
+    cap_drop:
+      - ALL
+    cap_add:
+      - SYS_PTRACE        # Process monitoring
+      - SYS_ADMIN         # Container monitoring
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:unconfined  # Required for deep system monitoring
+
+    volumes:
+      # System monitoring (read-only)
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc/os-release:/host/etc/os-release:ro
+      - /var/log:/host/var/log:ro
+
+      # Docker monitoring
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+      # Persistent config and data
+      - netdata_config:/etc/netdata
+      - netdata_lib:/var/lib/netdata
+      - netdata_cache:/var/cache/netdata
+
+    environment:
+      - NETDATA_CLAIM_TOKEN=${NETDATA_CLAIM_TOKEN:-}
+      - NETDATA_CLAIM_URL=https://app.netdata.cloud
+      - NETDATA_CLAIM_ROOMS=${NETDATA_CLAIM_ROOMS:-}
+
+    # Uncomment to expose directly (not recommended - use Caddy)
+    # ports:
+    #   - "19999:19999"
+
+    networks:
+      - monitoring
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:19999/api/v1/info"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+networks:
+  monitoring:
+    external: true
+
+volumes:
+  netdata_config:
+  netdata_lib:
+  netdata_cache:
