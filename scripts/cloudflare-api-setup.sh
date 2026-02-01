@@ -209,13 +209,24 @@ setup_cloudflare_api() {
   show_token_creation_guide "$domain"
 
   # Prompt for token
-  read -rsp "Paste your Cloudflare API token: " token
+  echo -e "${CYAN}Paste your Cloudflare API token (or press Enter to skip):${NC}"
+  echo -e "${BLUE}ℹ ${NC} Token won't be visible as you paste (security feature)"
+  echo ""
+  read -rsp "> " token
+  echo ""
   echo ""
 
   if [ -z "$token" ]; then
-    print_error "No token provided"
+    print_warning "No token provided - skipping API configuration"
+    echo ""
+    print_info "You can configure SSL/TLS manually at:"
+    echo "  https://dash.cloudflare.com → $domain → SSL/TLS → Overview"
+    echo "  Set Encryption mode to: Flexible"
+    echo ""
     return 1
   fi
+
+  print_step "Validating token..."
 
   # Validate token
   if ! validate_token "$token" "$domain"; then
@@ -225,10 +236,13 @@ setup_cloudflare_api() {
   # Save token
   save_token "$token" "$domain"
 
+  echo ""
   print_success "Cloudflare API setup complete!"
   echo ""
-  print_info "Token is stored at: $TOKEN_FILE"
-  print_info "This token will be reused for future operations"
+  print_info "Token stored securely at: $TOKEN_FILE"
+  print_info "This token will be reused for all future SSL/TLS operations"
+  echo ""
+  echo -e "${CYAN}Next: Configuring SSL/TLS settings automatically...${NC}"
   echo ""
 
   return 0
