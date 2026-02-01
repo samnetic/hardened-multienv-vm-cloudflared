@@ -170,16 +170,34 @@ lock_users() {
     print_step "Locking user: $user"
 
     # Lock password
-    passwd -l "$user" 2>/dev/null || true
+    if passwd -l "$user" 2>/dev/null; then
+      echo "  ✓ Password locked"
+    else
+      print_warning "  Failed to lock password (may already be locked)"
+    fi
 
     # Disable SSH (but keep for console)
     if [ -d "/home/$user/.ssh" ]; then
-      mv "/home/$user/.ssh/authorized_keys" "/home/$user/.ssh/authorized_keys.disabled" 2>/dev/null || true
+      if [ -f "/home/$user/.ssh/authorized_keys" ]; then
+        if mv "/home/$user/.ssh/authorized_keys" "/home/$user/.ssh/authorized_keys.disabled" 2>/dev/null; then
+          echo "  ✓ SSH keys disabled"
+        else
+          print_warning "  Failed to disable SSH keys"
+        fi
+      else
+        echo "  ℹ No SSH keys to disable (may already be disabled)"
+      fi
     fi
 
     # Remove from sudo group if present
     if groups "$user" | grep -q sudo; then
-      deluser "$user" sudo 2>/dev/null || true
+      if deluser "$user" sudo 2>/dev/null; then
+        echo "  ✓ Removed from sudo group"
+      else
+        print_warning "  Failed to remove from sudo group"
+      fi
+    else
+      echo "  ℹ Not in sudo group (already removed)"
     fi
 
     print_success "User $user locked (console access still works)"
@@ -206,9 +224,13 @@ delete_users() {
     print_step "Deleting user: $user"
 
     # Remove user and home directory
-    userdel -r "$user" 2>/dev/null || userdel "$user" 2>/dev/null || true
-
-    print_success "User $user deleted"
+    if userdel -r "$user" 2>/dev/null; then
+      print_success "User $user deleted (with home directory)"
+    elif userdel "$user" 2>/dev/null; then
+      print_success "User $user deleted (home directory kept)"
+    else
+      print_error "Failed to delete user $user"
+    fi
   done
 
   echo ""
