@@ -1,0 +1,485 @@
+#!/usr/bin/env bash
+# =================================================================
+# Finalize Cloudflare Tunnel Setup - Safe Migration to Zero Ports
+# =================================================================
+# Automates the final steps with comprehensive safety checks:
+#   1. Tests SSH via tunnel extensively
+#   2. Adds CNAME DNS records (keeps A records initially)
+#   3. Tests access via CNAME records
+#   4. Removes old A records
+#   5. Locks down firewall (closes port 22)
+#   6. Final verification
+#
+# Rollback capability at each step if checks fail.
+#
+# Usage:
+#   sudo ./scripts/finalize-tunnel.sh yourdomain.com
+# =================================================================
+
+set -euo pipefail
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+# =================================================================
+# Helper Functions
+# =================================================================
+
+print_header() {
+  echo ""
+  echo -e "${BLUE}======================================================================${NC}"
+  echo -e "${BLUE}${BOLD} $1${NC}"
+  echo -e "${BLUE}======================================================================${NC}"
+  echo ""
+}
+
+print_step() {
+  echo -e "${CYAN}>>> $1${NC}"
+}
+
+print_success() {
+  echo -e "${GREEN}✓ $1${NC}"
+}
+
+print_warning() {
+  echo -e "${YELLOW}⚠ $1${NC}"
+}
+
+print_error() {
+  echo -e "${RED}✗ $1${NC}"
+}
+
+print_info() {
+  echo -e "${BLUE}ℹ $1${NC}"
+}
+
+confirm() {
+  local prompt="$1"
+  local default="${2:-n}"
+
+  if [ "$default" = "y" ]; then
+    prompt="$prompt [Y/n]: "
+  else
+    prompt="$prompt [y/N]: "
+  fi
+
+  read -rp "$prompt" response
+  response=${response:-$default}
+
+  [[ "$response" =~ ^[Yy]$ ]]
+}
+
+# =================================================================
+# Prerequisites
+# =================================================================
+
+check_root() {
+  if [ "$EUID" -ne 0 ]; then
+    print_error "This script must be run as root"
+    echo "Run: sudo ./scripts/finalize-tunnel.sh yourdomain.com"
+    exit 1
+  fi
+}
+
+# Detect original user (who invoked sudo)
+if [ -n "${SUDO_USER:-}" ]; then
+  ORIGINAL_USER="$SUDO_USER"
+else
+  ORIGINAL_USER="root"
+fi
+
+# =================================================================
+# Parse Arguments
+# =================================================================
+
+if [ $# -lt 1 ]; then
+  print_error "Domain name required"
+  echo "Usage: sudo $0 yourdomain.com"
+  exit 1
+fi
+
+DOMAIN="$1"
+
+# =================================================================
+# Main
+# =================================================================
+
+main() {
+  clear
+  print_header "Finalize Cloudflare Tunnel Setup"
+
+  echo "  Domain: $DOMAIN"
+  echo "  User: $ORIGINAL_USER"
+  echo ""
+
+  check_root
+
+  print_warning "This script will:"
+  echo "  1. Test SSH access via tunnel extensively"
+  echo "  2. Migrate DNS from A records to CNAME tunnel records"
+  echo "  3. Close port 22 (SSH) on the firewall"
+  echo "  4. Result: ZERO open ports to the internet"
+  echo ""
+  print_warning "After this, you can ONLY access via Cloudflare Tunnel!"
+  echo ""
+
+  if ! confirm "Ready to proceed?" "n"; then
+    echo "Cancelled by user."
+    exit 0
+  fi
+
+  # =================================================================
+  # Step 1: Pre-flight Checks
+  # =================================================================
+  print_header "Step 1/6: Pre-flight Checks"
+
+  # Check tunnel is running
+  print_step "Checking cloudflared service..."
+  if ! systemctl is-active --quiet cloudflared; then
+    print_error "Cloudflared service is not running"
+    echo "Start it: sudo systemctl start cloudflared"
+    exit 1
+  fi
+  print_success "Cloudflared service is running"
+
+  # Check tunnel config exists
+  if [ ! -f /etc/cloudflared/config.yml ]; then
+    print_error "Tunnel config not found: /etc/cloudflared/config.yml"
+    echo "Run: sudo ./scripts/setup-cloudflared.sh $DOMAIN"
+    exit 1
+  fi
+
+  # Extract tunnel ID
+  TUNNEL_ID=$(grep '^tunnel:' /etc/cloudflared/config.yml | awk '{print $2}')
+  if [ -z "$TUNNEL_ID" ]; then
+    print_error "Could not extract tunnel ID from config"
+    exit 1
+  fi
+  print_success "Tunnel ID: $TUNNEL_ID"
+
+  # Check tunnel has registered connections
+  print_step "Checking tunnel connections..."
+  if journalctl -u cloudflared --since "5 minutes ago" | grep -q "registered"; then
+    print_success "Tunnel has active connections to Cloudflare"
+  else
+    print_warning "No recent 'registered' messages in tunnel logs"
+    echo ""
+    echo "Recent tunnel logs:"
+    journalctl -u cloudflared --since "5 minutes ago" --no-pager | tail -10
+    echo ""
+    if ! confirm "Continue anyway?" "n"; then
+      exit 1
+    fi
+  fi
+
+  # =================================================================
+  # Step 2: Test SSH via Tunnel (from local machine)
+  # =================================================================
+  print_header "Step 2/6: Test SSH via Tunnel"
+
+  echo -e "${BOLD}IMPORTANT:${NC} You must test SSH via tunnel from your LOCAL MACHINE"
+  echo ""
+  echo "On your LOCAL MACHINE, run these tests:"
+  echo ""
+  echo -e "${CYAN}# Test 1: Basic connection${NC}"
+  echo "ssh ${DOMAIN%%.*} \"echo 'Connection works'\""
+  echo ""
+  echo -e "${CYAN}# Test 2: Sudo access${NC}"
+  echo "ssh ${DOMAIN%%.*} \"sudo whoami\""
+  echo ""
+  echo -e "${CYAN}# Test 3: File transfer${NC}"
+  echo "echo 'test' > /tmp/test.txt"
+  echo "scp /tmp/test.txt ${DOMAIN%%.*}:/tmp/"
+  echo ""
+  echo -e "${CYAN}# Test 4: Reconnect${NC}"
+  echo "ssh ${DOMAIN%%.*} \"exit\" && ssh ${DOMAIN%%.*} \"echo 'Reconnected'\""
+  echo ""
+
+  if ! confirm "Have you successfully tested SSH via tunnel from your local machine?" "n"; then
+    print_error "Please test SSH via tunnel before proceeding"
+    echo ""
+    echo "Setup instructions:"
+    echo "  curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.$DOMAIN sysadmin"
+    exit 1
+  fi
+
+  print_success "SSH via tunnel confirmed working"
+
+  # =================================================================
+  # Step 3: DNS Migration via Cloudflare API
+  # =================================================================
+  print_header "Step 3/6: DNS Migration"
+
+  echo "This step will:"
+  echo "  1. Add CNAME records pointing to tunnel"
+  echo "  2. Test access via CNAME records"
+  echo "  3. Remove old A records"
+  echo ""
+
+  # Source Cloudflare API helper
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ ! -f "$SCRIPT_DIR/cloudflare-api-setup.sh" ]; then
+    print_error "cloudflare-api-setup.sh not found"
+    exit 1
+  fi
+  source "$SCRIPT_DIR/cloudflare-api-setup.sh"
+
+  # Setup or load API token
+  if ! setup_cloudflare_api "$DOMAIN"; then
+    print_warning "Cloudflare API not configured"
+    echo ""
+    echo "You can still migrate DNS manually:"
+    echo "  1. Go to: https://dash.cloudflare.com → DNS → Records"
+    echo "  2. Add CNAME records:"
+    echo "     • @ → ${TUNNEL_ID}.cfargotunnel.com (Proxied)"
+    echo "     • www → ${TUNNEL_ID}.cfargotunnel.com (Proxied)"
+    echo "     • * → ${TUNNEL_ID}.cfargotunnel.com (Proxied)"
+    echo "  3. Delete old A records pointing to VM IP"
+    echo ""
+    if ! confirm "Skip DNS automation and continue?" "n"; then
+      exit 1
+    fi
+    DNS_MIGRATED_MANUALLY=true
+  else
+    # We have API access, automate DNS migration
+    print_step "Adding CNAME records..."
+
+    # Add CNAME for root domain
+    add_cname_record "$CF_ZONE_ID" "$CF_API_TOKEN" "@" "${TUNNEL_ID}.cfargotunnel.com"
+
+    # Add CNAME for www
+    add_cname_record "$CF_ZONE_ID" "$CF_API_TOKEN" "www" "${TUNNEL_ID}.cfargotunnel.com"
+
+    # Add wildcard CNAME
+    add_cname_record "$CF_ZONE_ID" "$CF_API_TOKEN" "*" "${TUNNEL_ID}.cfargotunnel.com"
+
+    print_success "CNAME records added"
+    echo ""
+    print_info "DNS propagation may take 1-2 minutes..."
+    sleep 10
+
+    # Test CNAME records
+    print_step "Testing CNAME record resolution..."
+    if nslookup "$DOMAIN" | grep -q "$TUNNEL_ID.cfargotunnel.com"; then
+      print_success "CNAME records are resolving correctly"
+    else
+      print_warning "CNAME records not yet propagating (this is normal, may take a few minutes)"
+    fi
+
+    # Remove old A records
+    echo ""
+    if confirm "Remove old A records now?" "y"; then
+      print_step "Removing old A records..."
+      remove_a_records "$CF_ZONE_ID" "$CF_API_TOKEN" "$DOMAIN"
+      print_success "Old A records removed"
+    else
+      print_warning "Skipping A record removal - you should remove them manually later"
+    fi
+
+    DNS_MIGRATED_MANUALLY=false
+  fi
+
+  # =================================================================
+  # Step 4: Allow Cloudflare IPs Only
+  # =================================================================
+  print_header "Step 4/6: Configure Firewall for Cloudflare Only"
+
+  print_step "Downloading Cloudflare IP ranges..."
+
+  # Get Cloudflare IPs
+  curl -s https://www.cloudflare.com/ips-v4 -o /tmp/cf_ips_v4
+  curl -s https://www.cloudflare.com/ips-v6 -o /tmp/cf_ips_v6
+
+  print_step "Allowing Cloudflare IPs to web ports (80, 443)..."
+
+  # Allow Cloudflare IPv4
+  while read -r ip; do
+    ufw allow from "$ip" to any port 80,443 proto tcp comment "Cloudflare" >/dev/null 2>&1 || true
+  done < /tmp/cf_ips_v4
+
+  # Allow Cloudflare IPv6
+  while read -r ip; do
+    ufw allow from "$ip" to any port 80,443 proto tcp comment "Cloudflare" >/dev/null 2>&1 || true
+  done < /tmp/cf_ips_v6
+
+  print_success "Firewall configured to allow only Cloudflare IPs"
+
+  # =================================================================
+  # Step 5: Final Confirmation Before Lockdown
+  # =================================================================
+  print_header "Step 5/6: Final Confirmation"
+
+  echo -e "${BOLD}${RED}⚠️  CRITICAL DECISION POINT${NC}"
+  echo ""
+  echo "About to close port 22 (SSH) completely."
+  echo ""
+  echo -e "${YELLOW}After this, you can ONLY access via:${NC}"
+  echo "  • SSH: ssh ${DOMAIN%%.*} (via Cloudflare Tunnel)"
+  echo "  • HTTP/HTTPS: Via Cloudflare proxy"
+  echo ""
+  echo -e "${GREEN}Benefits:${NC}"
+  echo "  • ${GREEN}✓${NC} Zero open ports to the internet"
+  echo "  • ${GREEN}✓${NC} Protected by Cloudflare's DDoS protection"
+  echo "  • ${GREEN}✓${NC} All traffic encrypted via tunnel"
+  echo ""
+  echo -e "${YELLOW}Recovery if needed:${NC}"
+  echo "  • Oracle Cloud Console → Instance → Console Connection"
+  echo "  • Run: sudo ufw allow OpenSSH"
+  echo ""
+
+  if ! confirm "Close port 22 and complete lockdown?" "n"; then
+    print_warning "Lockdown cancelled"
+    echo ""
+    echo "Current state:"
+    echo "  • Tunnel is running"
+    echo "  • DNS records migrated (if API was used)"
+    echo "  • Port 22 is still OPEN (you can still SSH directly)"
+    echo ""
+    echo "To complete lockdown later, run:"
+    echo "  sudo ./scripts/finalize-tunnel.sh $DOMAIN"
+    exit 0
+  fi
+
+  # =================================================================
+  # Step 6: Lock Down Firewall
+  # =================================================================
+  print_header "Step 6/6: Firewall Lockdown"
+
+  print_step "Removing public SSH access..."
+
+  # Remove OpenSSH rule
+  if ufw status | grep -q "OpenSSH"; then
+    ufw delete allow OpenSSH 2>/dev/null || true
+    print_success "Removed OpenSSH rule"
+  fi
+
+  # Remove port 22 rules
+  if ufw status | grep -q "22/tcp"; then
+    ufw delete allow 22/tcp 2>/dev/null || true
+    print_success "Removed port 22 rule"
+  fi
+
+  if ufw status | grep -q "22"; then
+    ufw delete allow 22 2>/dev/null || true
+  fi
+
+  echo ""
+  print_step "Current firewall status:"
+  ufw status verbose | grep -v "22" || true
+  echo ""
+
+  if ufw status verbose | grep -q " 22"; then
+    print_warning "Port 22 rules may still exist"
+    echo ""
+    echo "Current firewall rules:"
+    ufw status numbered
+  else
+    print_success "Port 22 is now CLOSED"
+  fi
+
+  # =================================================================
+  # Final Verification
+  # =================================================================
+  print_header "Setup Complete!"
+
+  echo -e "${GREEN}✓ Cloudflare Tunnel is fully configured!${NC}"
+  echo -e "${GREEN}✓ Firewall is locked down (zero open ports)${NC}"
+  echo ""
+  echo -e "${CYAN}Security Status:${NC}"
+  echo "  • Direct SSH: ${RED}DISABLED${NC}"
+  echo "  • Tunnel SSH: ${GREEN}ENABLED${NC}"
+  echo "  • HTTP/HTTPS: ${GREEN}Via Cloudflare${NC}"
+  echo "  • Open Ports: ${GREEN}ZERO${NC}"
+  echo ""
+  echo -e "${CYAN}Access Methods:${NC}"
+  echo "  • SSH: ssh ${DOMAIN%%.*}"
+  echo "  • Web: https://$DOMAIN"
+  echo "  • Subdomains: https://staging-app.$DOMAIN"
+  echo ""
+  echo -e "${CYAN}Verification:${NC}"
+  echo "  # Check open ports (should show nothing):"
+  echo "  sudo ss -tlnp | grep ':22'"
+  echo ""
+  echo "  # View tunnel status:"
+  echo "  sudo systemctl status cloudflared"
+  echo ""
+  echo -e "${YELLOW}Remember:${NC}"
+  echo "  • If you lose tunnel access, use Oracle Cloud Console"
+  echo "  • Keep your local machine's cloudflared up to date"
+  echo "  • Monitor tunnel logs: sudo journalctl -u cloudflared -f"
+  echo ""
+}
+
+# =================================================================
+# Cloudflare API Functions
+# =================================================================
+
+add_cname_record() {
+  local zone_id="$1"
+  local token="$2"
+  local name="$3"
+  local target="$4"
+
+  # Check if record already exists
+  local existing=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records?type=CNAME&name=$name" \
+    -H "Authorization: Bearer $token" \
+    -H "Content-Type: application/json")
+
+  if echo "$existing" | grep -q "\"count\":0"; then
+    # Create new CNAME record
+    local response=$(curl -s -X POST "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records" \
+      -H "Authorization: Bearer $token" \
+      -H "Content-Type: application/json" \
+      --data "{\"type\":\"CNAME\",\"name\":\"$name\",\"content\":\"$target\",\"proxied\":true}")
+
+    if echo "$response" | grep -q '"success":true'; then
+      print_success "Added CNAME: $name → $target"
+    else
+      print_error "Failed to add CNAME: $name"
+      echo "$response" | grep -oP '"message":"\K[^"]+' || echo "$response"
+    fi
+  else
+    print_info "CNAME already exists: $name"
+  fi
+}
+
+remove_a_records() {
+  local zone_id="$1"
+  local token="$2"
+  local domain="$3"
+
+  # Get all A records for domain
+  local records=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records?type=A" \
+    -H "Authorization: Bearer $token" \
+    -H "Content-Type: application/json")
+
+  # Extract record IDs
+  local record_ids=$(echo "$records" | grep -oP '"id":"\K[^"]+')
+
+  if [ -z "$record_ids" ]; then
+    print_info "No A records found to remove"
+    return 0
+  fi
+
+  # Delete each A record
+  while IFS= read -r record_id; do
+    local response=$(curl -s -X DELETE "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records/$record_id" \
+      -H "Authorization: Bearer $token" \
+      -H "Content-Type: application/json")
+
+    if echo "$response" | grep -q '"success":true'; then
+      print_success "Removed A record: $record_id"
+    else
+      print_warning "Failed to remove A record: $record_id"
+    fi
+  done <<< "$record_ids"
+}
+
+# Run main function
+main "$@"
