@@ -13,16 +13,21 @@ set -euo pipefail
 
 # Parse arguments
 FORCE_JAMMY=false
+SKIP_GPG_CHECK=false
 for arg in "$@"; do
   case $arg in
     --force-jammy)
       FORCE_JAMMY=true
       ;;
+    --skip-gpg-check)
+      SKIP_GPG_CHECK=true
+      ;;
     --help|-h)
-      echo "Usage: $0 [--force-jammy]"
+      echo "Usage: $0 [OPTIONS]"
       echo ""
       echo "Options:"
-      echo "  --force-jammy   Use Ubuntu 22.04 (jammy) repo if current distro repo unavailable"
+      echo "  --force-jammy      Use Ubuntu 22.04 (jammy) repo if current distro repo unavailable"
+      echo "  --skip-gpg-check   Skip GPG key fingerprint verification (not recommended)"
       exit 0
       ;;
   esac
@@ -58,24 +63,59 @@ mkdir -p --mode=0755 /usr/share/keyrings
 echo "Adding Cloudflare GPG key..."
 curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg -o /usr/share/keyrings/cloudflare-main.gpg
 
-# Verify Cloudflare GPG key fingerprint (official fingerprint from pkg.cloudflare.com)
+# Verify Cloudflare GPG key fingerprint
+# Multiple fingerprints supported for key rotation transitions
 # Userid: "CloudFlare Software Packaging <help@cloudflare.com>"
-# Note: Using case-insensitive grep and normalizing to uppercase for comparison
-# Updated: Key rotated on October 30, 2025
-echo "Verifying Cloudflare GPG key fingerprint..."
-CLOUDFLARE_GPG_FINGERPRINT=$(gpg --show-keys --with-fingerprint /usr/share/keyrings/cloudflare-main.gpg 2>/dev/null | grep -oiP '([a-f0-9]{4}\s*){10}' | tr -d ' ' | tr '[:lower:]' '[:upper:]' | head -1)
-EXPECTED_CF_FINGERPRINT="CC94B39C77AE7342A68B89628A682D308D4E5E73"
-if [ "$CLOUDFLARE_GPG_FINGERPRINT" != "$EXPECTED_CF_FINGERPRINT" ]; then
-  echo -e "${RED}✗ Cloudflare GPG key fingerprint mismatch!${NC}"
-  echo -e "${RED}  Expected: $EXPECTED_CF_FINGERPRINT${NC}"
-  echo -e "${RED}  Got:      $CLOUDFLARE_GPG_FINGERPRINT${NC}"
-  echo ""
-  echo "This could indicate a supply chain attack or key rotation."
-  echo "Verify the current fingerprint at: https://pkg.cloudflare.com/"
-  rm -f /usr/share/keyrings/cloudflare-main.gpg
-  exit 1
+if [ "$SKIP_GPG_CHECK" = true ]; then
+  echo -e "${YELLOW}⚠ Skipping GPG key verification (--skip-gpg-check)${NC}"
+else
+  echo "Verifying Cloudflare GPG key fingerprint..."
+  CLOUDFLARE_GPG_FINGERPRINT=$(gpg --show-keys --with-fingerprint /usr/share/keyrings/cloudflare-main.gpg 2>/dev/null | grep -oiP '([a-f0-9]{4}\s*){10}' | tr -d ' ' | tr '[:lower:]' '[:upper:]' | head -1)
+
+  # Known valid Cloudflare GPG fingerprints
+  # Add new fingerprints here when Cloudflare rotates keys
+  KNOWN_FINGERPRINTS=(
+    "CC94B39C77AE7342A68B89628A682D308D4E5E73"  # Current (Oct 2025)
+    "FBA8C0EE63617C5EED695C43254B391D8CACCBF8"  # Legacy (pre-Oct 2025)
+  )
+
+  # Check if fingerprint matches any known good fingerprint
+  FINGERPRINT_VALID=false
+  for known_fp in "${KNOWN_FINGERPRINTS[@]}"; do
+    if [ "$CLOUDFLARE_GPG_FINGERPRINT" = "$known_fp" ]; then
+      FINGERPRINT_VALID=true
+      break
+    fi
+  done
+
+  if [ "$FINGERPRINT_VALID" = true ]; then
+    echo -e "${GREEN}✓ Cloudflare GPG key verified${NC}"
+    echo "  Fingerprint: $CLOUDFLARE_GPG_FINGERPRINT"
+  else
+    echo -e "${YELLOW}⚠ Unknown Cloudflare GPG key fingerprint!${NC}"
+    echo -e "${YELLOW}  Got: $CLOUDFLARE_GPG_FINGERPRINT${NC}"
+    echo ""
+    echo "This could be:"
+    echo "  1. A new key rotation by Cloudflare"
+    echo "  2. A supply chain attack (unlikely but possible)"
+    echo ""
+    echo "Known valid fingerprints:"
+    for known_fp in "${KNOWN_FINGERPRINTS[@]}"; do
+      echo "  - $known_fp"
+    done
+    echo ""
+    echo "Please verify the fingerprint at: https://pkg.cloudflare.com/"
+    echo "If this is a legitimate new key, update this script with the new fingerprint."
+    echo ""
+    read -rp "Do you want to proceed anyway? (yes/no): " PROCEED_ANYWAY
+    if [ "$PROCEED_ANYWAY" != "yes" ]; then
+      echo -e "${RED}✗ Installation cancelled${NC}"
+      rm -f /usr/share/keyrings/cloudflare-main.gpg
+      exit 1
+    fi
+    echo -e "${YELLOW}⚠ Proceeding with unknown GPG key (user confirmed)${NC}"
+  fi
 fi
-echo -e "${GREEN}✓ Cloudflare GPG key verified${NC}"
 
 # Check if cloudflared repo exists for this codename
 echo "Checking Cloudflare repository availability..."
