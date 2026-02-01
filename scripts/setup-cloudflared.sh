@@ -267,6 +267,68 @@ EOF
   echo ""
 
   # =================================================================
+  # Step 5.5: Configure Cloudflare SSL/TLS (Optional)
+  # =================================================================
+  print_header "Step 5.5/7: Configure Cloudflare SSL/TLS (Optional)"
+
+  echo "To automate SSL/TLS configuration, you need a Cloudflare API token"
+  echo ""
+  echo "Create one at: https://dash.cloudflare.com/profile/api-tokens"
+  echo "  Template: Edit zone DNS"
+  echo "  Permissions: Zone.SSL and TLS (Edit), Zone.Zone (Read)"
+  echo "  Zone Resources: Include → Specific zone → $DOMAIN"
+  echo ""
+
+  read -rp "Do you have a Cloudflare API token? (yes/no): " HAS_API_TOKEN
+
+  if [ "$HAS_API_TOKEN" = "yes" ]; then
+    read -rsp "Enter your Cloudflare API token: " CF_API_TOKEN
+    echo ""
+
+    if [ -z "$CF_API_TOKEN" ]; then
+      print_warning "No API token provided, skipping SSL/TLS configuration"
+    else
+      print_step "Getting Zone ID for $DOMAIN..."
+
+      # Get Zone ID
+      ZONE_RESPONSE=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones?name=$DOMAIN" \
+        -H "Authorization: Bearer $CF_API_TOKEN" \
+        -H "Content-Type: application/json")
+
+      ZONE_ID=$(echo "$ZONE_RESPONSE" | grep -oP '"id":"\K[^"]+' | head -1)
+
+      if [ -z "$ZONE_ID" ]; then
+        print_error "Failed to get Zone ID"
+        print_info "API Response: $ZONE_RESPONSE"
+        print_warning "Skipping SSL/TLS configuration - you can set manually in Cloudflare dashboard"
+      else
+        print_success "Zone ID: $ZONE_ID"
+
+        print_step "Setting SSL/TLS mode to Flexible..."
+
+        SSL_RESPONSE=$(curl -s -X PATCH "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/settings/ssl" \
+          -H "Authorization: Bearer $CF_API_TOKEN" \
+          -H "Content-Type: application/json" \
+          --data '{"value":"flexible"}')
+
+        if echo "$SSL_RESPONSE" | grep -q '"success":true'; then
+          print_success "SSL/TLS mode set to Flexible"
+        else
+          print_error "Failed to set SSL/TLS mode"
+          print_info "API Response: $SSL_RESPONSE"
+          print_warning "Set manually: Cloudflare Dashboard → SSL/TLS → Overview → Flexible"
+        fi
+      fi
+    fi
+  else
+    print_info "Skipping SSL/TLS auto-configuration"
+    echo ""
+    print_warning "Remember to set SSL/TLS mode manually:"
+    echo "  Cloudflare Dashboard → SSL/TLS → Overview → Encryption mode: Flexible"
+    echo ""
+  fi
+
+  # =================================================================
   # Step 6: Install and Start Service
   # =================================================================
   print_header "Step 6/7: Install and Start Service"
@@ -326,42 +388,53 @@ EOF
   echo ""
   echo -e "${CYAN}Next Steps:${NC}"
   echo ""
-  echo -e "1. ${BOLD}Configure DNS in Cloudflare Dashboard${NC}"
-  echo "   Go to: https://dash.cloudflare.com"
-  echo "   DNS → Records → Add these CNAME records:"
+  echo -e "1. ${BOLD}Add DNS CNAME Records (Wildcard)${NC}"
+  echo "   Go to: https://dash.cloudflare.com → DNS → Records"
+  echo "   Add these CNAME records:"
   echo ""
-  echo "   Type    Name           Target                              Proxy"
-  echo "   ────────────────────────────────────────────────────────────────"
-  echo "   CNAME   @              ${TUNNEL_ID}.cfargotunnel.com      ✅"
-  echo "   CNAME   www            ${TUNNEL_ID}.cfargotunnel.com      ✅"
-  echo "   CNAME   *              ${TUNNEL_ID}.cfargotunnel.com      ✅"
-  echo "   CNAME   ssh            ${TUNNEL_ID}.cfargotunnel.com      ✅ (already created)"
+  echo "   Type    Name    Target                              Proxy"
+  echo "   ───────────────────────────────────────────────────────────"
+  echo "   CNAME   @       ${TUNNEL_ID}.cfargotunnel.com      ✅"
+  echo "   CNAME   www     ${TUNNEL_ID}.cfargotunnel.com      ✅"
+  echo "   CNAME   *       ${TUNNEL_ID}.cfargotunnel.com      ✅"
+  echo "   CNAME   ssh     ${TUNNEL_ID}.cfargotunnel.com      ✅ (already done)"
   echo ""
-  echo -e "2. ${BOLD}Set SSL/TLS Mode to Flexible${NC}"
-  echo "   SSL/TLS → Overview → Encryption mode: Flexible"
+  echo "   ${GREEN}✓ The wildcard (*) covers ALL subdomains!${NC}"
+  echo "   ${CYAN}ℹ Cloudflare automatically provisions FREE SSL certs for *.${DOMAIN}${NC}"
+  echo "   ${CYAN}ℹ No manual cert management needed - everything is automatic!${NC}"
   echo ""
-  echo -e "3. ${BOLD}Install cloudflared on Your Local Machine${NC}"
+  if [ "$HAS_API_TOKEN" != "yes" ]; then
+    echo -e "2. ${BOLD}Set SSL/TLS Mode to Flexible${NC}"
+    echo "   ${YELLOW}⚠ MANUAL STEP REQUIRED${NC}"
+    echo "   Go to: SSL/TLS → Overview → Encryption mode: Flexible"
+    echo ""
+  else
+    echo -e "2. ${BOLD}SSL/TLS Configuration${NC}"
+    echo "   ${GREEN}✓ Already configured (Flexible mode)${NC}"
+    echo ""
+  fi
+  echo -e "3. ${BOLD}Set Up Local Machine for Tunnel SSH${NC}"
+  echo "   ${CYAN}Run this on YOUR LOCAL MACHINE (not the server):${NC}"
+  echo ""
+  echo "   # Download and run automated setup:"
+  echo "   curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.$DOMAIN sysadmin"
+  echo ""
+  echo "   # Or manual installation:"
   echo "   macOS: brew install cloudflared"
-  echo "   Ubuntu: See scripts/install-cloudflared.sh"
+  echo "   Ubuntu: curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb && sudo dpkg -i cloudflared.deb"
   echo ""
-  echo -e "4. ${BOLD}Configure Local SSH Config${NC}"
-  echo "   Edit ~/.ssh/config:"
+  echo -e "4. ${BOLD}Test SSH via Tunnel${NC}"
+  echo "   ssh ${DOMAIN%%.*}  # Uses SSH alias created by setup script"
   echo ""
-  echo "   Host $DOMAIN"
-  echo "     HostName ssh.$DOMAIN"
-  echo "     User sysadmin"
-  echo "     ProxyCommand cloudflared access ssh --hostname ssh.$DOMAIN"
-  echo ""
-  echo -e "5. ${BOLD}Test SSH via Tunnel${NC}"
-  echo "   ssh $DOMAIN"
-  echo ""
-  echo -e "6. ${BOLD}Start Caddy Reverse Proxy${NC}"
+  echo -e "5. ${BOLD}Start Caddy Reverse Proxy${NC}"
   echo "   cd /opt/hosting-blueprint/infra/reverse-proxy"
   echo "   docker compose up -d"
   echo ""
-  echo -e "7. ${BOLD}Lock Down Firewall (After Testing!)${NC}"
+  echo -e "6. ${BOLD}Lock Down Firewall (CRITICAL - After Testing!)${NC}"
+  echo "   ${YELLOW}⚠ ONLY after confirming tunnel SSH works!${NC}"
   echo "   sudo ufw delete allow OpenSSH"
   echo "   sudo ufw delete allow 22/tcp"
+  echo "   ${GREEN}✓ Result: Zero open ports - all access via Cloudflare Tunnel!${NC}"
   echo ""
   echo -e "${BLUE}Documentation:${NC}"
   echo "  • infra/cloudflared/tunnel-setup.md - Full setup guide"
