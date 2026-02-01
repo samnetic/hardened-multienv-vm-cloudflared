@@ -49,7 +49,74 @@ feature/xyz branch ──push──▶ DEV (auto)
 
 ---
 
-## Quick Start
+## 🚀 Universal Quickstart (5 Minutes)
+
+Works on **any** cloud provider (Oracle, AWS, Hetzner, DigitalOcean, Vultr, Linode).
+
+### Step 1: SSH into Your Fresh VM
+
+```bash
+# Oracle Cloud (default user: ubuntu)
+ssh ubuntu@YOUR_VM_IP
+
+# AWS (default user varies: ubuntu, ec2-user, admin)
+ssh ubuntu@YOUR_VM_IP
+
+# Other providers: Check their documentation for default user
+```
+
+### Step 2: Clone This Repo
+
+```bash
+# Install git (if not already installed)
+sudo apt update && sudo apt install -y git
+
+# Clone to the expected location
+sudo git clone https://github.com/YOUR_USERNAME/hardened-multienv-vm-cloudflared.git /opt/hosting-blueprint
+
+# Fix ownership (handles different cloud provider default users automatically)
+sudo chown -R $(whoami):$(whoami) /opt/hosting-blueprint
+
+# Navigate to repo
+cd /opt/hosting-blueprint
+```
+
+### Step 3: Run Setup
+
+```bash
+# Interactive setup with automatic detection
+sudo ./setup.sh
+```
+
+**The script will ask you:**
+1. Domain name (e.g., `yourdomain.com`)
+2. SSH public key for new admin user
+3. Timezone
+4. Whether to set up Cloudflare Tunnel
+
+**It handles automatically:**
+- ✅ Detects your cloud provider's default user
+- ✅ Fixes git ownership issues
+- ✅ Works on Oracle Cloud, AWS, DigitalOcean, etc.
+- ✅ Handles ICMP/ping blocking (Oracle Cloud)
+
+### Step 4: Manage Default User (Post-Setup)
+
+After setup creates your new `sysadmin` and `appmgr` users:
+
+```bash
+# Manage the original default user (ubuntu, ec2-user, etc.)
+sudo ./scripts/post-setup-user-cleanup.sh
+```
+
+**Options:**
+- **Lock** (recommended) - Keeps console access, disables SSH
+- **Delete** - More secure, removes console access (use with caution)
+- **Keep Active** - Leave unchanged (not recommended)
+
+---
+
+## Quick Start (Detailed)
 
 ### Option 1: Interactive Setup (Recommended)
 
