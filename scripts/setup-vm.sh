@@ -382,6 +382,13 @@ else
     adduser --disabled-password --gecos "Application Manager" "$APPMGR_USER"
     print_success "Created user '$APPMGR_USER' (no sudo, docker only)"
   fi
+
+  # Fix repository ownership for sysadmin user
+  if [ -d "${SCRIPT_DIR}/.git" ]; then
+    print_step "Fixing repository ownership for $SYSADMIN_USER..."
+    chown -R "${SYSADMIN_USER}:${SYSADMIN_USER}" "${SCRIPT_DIR}"
+    print_success "Repository ownership set to $SYSADMIN_USER"
+  fi
 fi
 
 # =================================================================
