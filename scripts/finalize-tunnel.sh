@@ -329,8 +329,12 @@ main() {
   echo "  • ${GREEN}✓${NC} All traffic encrypted via tunnel"
   echo ""
   echo -e "${YELLOW}Recovery if needed:${NC}"
-  echo "  • Oracle Cloud Console → Instance → Console Connection"
-  echo "  • Run: sudo ufw allow OpenSSH"
+  echo "  • Use your cloud provider's web console (serial/VNC access):"
+  echo "    - Oracle Cloud: Instance → Console Connection"
+  echo "    - AWS: EC2 → Connect → EC2 Serial Console"
+  echo "    - Hetzner: Cloud Console → Your Server → Console"
+  echo "    - DigitalOcean: Droplets → Access → Recovery Console"
+  echo "  • From console, run: sudo ufw allow OpenSSH"
   echo ""
 
   if ! confirm "Close port 22 and complete lockdown?" "n"; then
@@ -351,36 +355,43 @@ main() {
   # =================================================================
   print_header "Step 6/6: Firewall Lockdown"
 
-  print_step "Removing public SSH access..."
+  print_step "Blocking external SSH access..."
 
-  # Remove OpenSSH rule
+  # Remove any existing allow rules for port 22
   if ufw status | grep -q "OpenSSH"; then
     ufw delete allow OpenSSH 2>/dev/null || true
-    print_success "Removed OpenSSH rule"
+    print_info "Removed OpenSSH rule"
   fi
 
-  # Remove port 22 rules
   if ufw status | grep -q "22/tcp"; then
     ufw delete allow 22/tcp 2>/dev/null || true
-    print_success "Removed port 22 rule"
+    print_info "Removed port 22/tcp allow rule"
   fi
 
-  if ufw status | grep -q "22"; then
+  if ufw status | grep -q " 22 "; then
     ufw delete allow 22 2>/dev/null || true
+    print_info "Removed port 22 allow rule"
   fi
 
+  # Add explicit DENY rule for port 22 from anywhere
+  # This blocks external access while allowing tunnel (localhost) connections
+  print_step "Adding deny rule for port 22..."
+  ufw deny 22/tcp comment "SSH blocked - use Cloudflare Tunnel only" 2>/dev/null || true
+  print_success "Port 22 access denied from external IPs"
+
   echo ""
-  print_step "Current firewall status:"
-  ufw status verbose | grep -v "22" || true
+  print_info "Tunnel can still access SSH via localhost (127.0.0.1:22)"
   echo ""
 
-  if ufw status verbose | grep -q " 22"; then
-    print_warning "Port 22 rules may still exist"
+  # Verify port 22 is blocked
+  print_step "Verifying firewall configuration..."
+  if ufw status | grep -q "22/tcp.*DENY"; then
+    print_success "Port 22 is now BLOCKED externally"
+  else
+    print_warning "Could not verify port 22 deny rule"
     echo ""
     echo "Current firewall rules:"
     ufw status numbered
-  else
-    print_success "Port 22 is now CLOSED"
   fi
 
   # =================================================================
@@ -403,14 +414,21 @@ main() {
   echo "  • Subdomains: https://staging-app.$DOMAIN"
   echo ""
   echo -e "${CYAN}Verification:${NC}"
-  echo "  # Check open ports (should show nothing):"
-  echo "  sudo ss -tlnp | grep ':22'"
+  echo "  # SSH daemon still listens (for tunnel), but firewall blocks external access:"
+  echo "  sudo ss -tlnp | grep ':22'  # Will show SSH listening"
+  echo "  sudo ufw status | grep 22   # Will show DENY rule"
+  echo ""
+  echo "  # Test from LOCAL MACHINE (should FAIL):"
+  echo "  ssh -i ~/.ssh/your-key.key user@${DOMAIN%%.*}-direct-ip  # Should timeout/be refused"
+  echo ""
+  echo "  # Test via tunnel (should WORK):"
+  echo "  ssh ${DOMAIN%%.*}  # Should connect successfully"
   echo ""
   echo "  # View tunnel status:"
   echo "  sudo systemctl status cloudflared"
   echo ""
   echo -e "${YELLOW}Remember:${NC}"
-  echo "  • If you lose tunnel access, use Oracle Cloud Console"
+  echo "  • If you lose tunnel access, use your cloud provider's console"
   echo "  • Keep your local machine's cloudflared up to date"
   echo "  • Monitor tunnel logs: sudo journalctl -u cloudflared -f"
   echo ""
