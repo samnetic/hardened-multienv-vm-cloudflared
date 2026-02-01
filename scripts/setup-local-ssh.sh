@@ -12,11 +12,14 @@
 #
 # Usage:
 #   # Download and run directly:
-#   curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.codeagen.com sysadmin
+#   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.codeagen.com sysadmin ~/.ssh/id_rsa
 #
 #   # Or download, review, then run:
-#   wget https://raw.githubusercontent.com/YOUR_USERNAME/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh
+#   wget https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh
 #   chmod +x setup-local-ssh.sh
+#   ./setup-local-ssh.sh ssh.yourdomain.com sysadmin ~/.ssh/id_rsa
+#
+#   # Auto-detect identity file (will search for common SSH keys):
 #   ./setup-local-ssh.sh ssh.yourdomain.com sysadmin
 # =================================================================
 
@@ -85,15 +88,17 @@ confirm() {
 
 if [ $# -lt 2 ]; then
   print_error "Missing required arguments"
-  echo "Usage: $0 ssh.yourdomain.com username"
+  echo "Usage: $0 ssh.yourdomain.com username [identity_file]"
   echo ""
   echo "Example:"
-  echo "  $0 ssh.codeagen.com sysadmin"
+  echo "  $0 ssh.codeagen.com sysadmin ~/.ssh/id_rsa"
+  echo "  $0 ssh.codeagen.com sysadmin  # Auto-detect identity file"
   exit 1
 fi
 
 SSH_HOSTNAME="$1"
 SSH_USER="$2"
+IDENTITY_FILE="${3:-}"
 
 # Extract domain from hostname (remove 'ssh.' prefix if present)
 DOMAIN="${SSH_HOSTNAME#ssh.}"
@@ -102,9 +107,75 @@ DOMAIN="${SSH_HOSTNAME#ssh.}"
 # Example: "codeagen" for sysadmin, "codeagen-appmgr" for appmgr
 BASE_ALIAS="${DOMAIN%%.*}"
 if [ "$SSH_USER" = "sysadmin" ]; then
-  SSH_ALIAS="${3:-$BASE_ALIAS}"
+  SSH_ALIAS="$BASE_ALIAS"
 else
-  SSH_ALIAS="${3:-${BASE_ALIAS}-${SSH_USER}}"
+  SSH_ALIAS="${BASE_ALIAS}-${SSH_USER}"
+fi
+
+# Auto-detect or select identity file if not provided
+if [ -z "$IDENTITY_FILE" ]; then
+  # Find all private keys in ~/.ssh/
+  mapfile -t AVAILABLE_KEYS < <(find ~/.ssh/ -maxdepth 1 -type f \( -name "id_*" -o -name "*key" -o -name "*_rsa" \) ! -name "*.pub" 2>/dev/null)
+
+  if [ ${#AVAILABLE_KEYS[@]} -eq 0 ]; then
+    print_error "No SSH private keys found in ~/.ssh/"
+    echo ""
+    read -rp "Enter path to your SSH private key: " IDENTITY_FILE
+
+    if [ ! -f "$IDENTITY_FILE" ]; then
+      print_error "Identity file not found: $IDENTITY_FILE"
+      exit 1
+    fi
+  elif [ ${#AVAILABLE_KEYS[@]} -eq 1 ]; then
+    # Only one key found, use it automatically
+    IDENTITY_FILE="${AVAILABLE_KEYS[0]}"
+    print_info "Found SSH key: $IDENTITY_FILE"
+  else
+    # Multiple keys found, let user choose
+    echo ""
+    print_info "Multiple SSH keys found. Please select which one to use:"
+    echo ""
+
+    for i in "${!AVAILABLE_KEYS[@]}"; do
+      key="${AVAILABLE_KEYS[$i]}"
+      # Show key type and fingerprint if possible
+      key_type=$(ssh-keygen -l -f "$key" 2>/dev/null | awk '{print $4}' | tr -d '()')
+      if [ -n "$key_type" ]; then
+        echo "  $((i+1))) $(basename "$key") [$key_type]"
+      else
+        echo "  $((i+1))) $(basename "$key")"
+      fi
+    done
+
+    echo ""
+    read -rp "Select key (1-${#AVAILABLE_KEYS[@]}): " key_selection
+
+    # Validate selection
+    if ! [[ "$key_selection" =~ ^[0-9]+$ ]] || [ "$key_selection" -lt 1 ] || [ "$key_selection" -gt ${#AVAILABLE_KEYS[@]} ]; then
+      print_error "Invalid selection"
+      exit 1
+    fi
+
+    IDENTITY_FILE="${AVAILABLE_KEYS[$((key_selection-1))]}"
+    echo ""
+    print_success "Selected: $IDENTITY_FILE"
+  fi
+fi
+
+# Expand tilde to home directory
+IDENTITY_FILE="${IDENTITY_FILE/#\~/$HOME}"
+
+# Verify identity file exists
+if [ ! -f "$IDENTITY_FILE" ]; then
+  print_error "Identity file not found: $IDENTITY_FILE"
+  exit 1
+fi
+
+# Verify it's actually a private key (not a .pub file)
+if [[ "$IDENTITY_FILE" == *.pub ]]; then
+  print_error "You selected a PUBLIC key (.pub file)"
+  echo "You need the PRIVATE key (without .pub extension)"
+  exit 1
 fi
 
 # =================================================================
@@ -286,6 +357,7 @@ configure_ssh() {
 Host $SSH_ALIAS
   HostName $SSH_HOSTNAME
   User $SSH_USER
+  IdentityFile $IDENTITY_FILE
   ProxyCommand cloudflared access ssh --hostname $SSH_HOSTNAME
   ServerAliveInterval 60
   ServerAliveCountMax 3
@@ -301,6 +373,7 @@ EOF
   Host $SSH_ALIAS
     HostName $SSH_HOSTNAME
     User $SSH_USER
+    IdentityFile $IDENTITY_FILE
     ProxyCommand cloudflared access ssh --hostname $SSH_HOSTNAME
 EOF
   echo ""
@@ -351,6 +424,7 @@ main() {
   echo "  SSH Hostname: $SSH_HOSTNAME"
   echo "  SSH User: $SSH_USER"
   echo "  SSH Alias: $SSH_ALIAS"
+  echo "  Identity File: $IDENTITY_FILE"
   echo ""
 
   detect_os
