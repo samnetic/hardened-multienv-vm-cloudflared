@@ -58,48 +58,46 @@ print_info() {
 show_token_creation_guide() {
   local domain="$1"
 
-  cat << EOF
-
-${BOLD}${CYAN}╔═══════════════════════════════════════════════════════════════╗
-║  Cloudflare API Token Creation Guide                         ║
-╚═══════════════════════════════════════════════════════════════╝${NC}
-
-We need ONE comprehensive token that can manage everything.
-
-${BOLD}Step-by-Step Instructions:${NC}
-
-1. Open in browser: ${CYAN}https://dash.cloudflare.com/profile/api-tokens${NC}
-
-2. Click ${BOLD}"Create Token"${NC}
-
-3. Click ${BOLD}"Create Custom Token"${NC} (NOT the templates)
-
-4. Token name: ${BOLD}"Hardened VPS Management - ${domain}"${NC}
-
-5. ${BOLD}Permissions:${NC} Add these (click "+ Add more"):
-
-   ${GREEN}✓${NC} Account | Cloudflare Tunnel | Edit
-   ${GREEN}✓${NC} Zone | DNS | Edit
-   ${GREEN}✓${NC} Zone | SSL and TLS | Edit
-   ${GREEN}✓${NC} Zone | Zone Settings | Edit
-   ${GREEN}✓${NC} Zone | Zone | Read
-
-6. ${BOLD}Zone Resources:${NC}
-   Include | Specific zone | ${CYAN}${domain}${NC}
-
-7. ${BOLD}Client IP Address Filtering:${NC}
-   Leave blank (or add your server IP for extra security)
-
-8. ${BOLD}TTL:${NC}
-   Leave as default or set expiration
-
-9. Click ${BOLD}"Continue to summary"${NC} → ${BOLD}"Create Token"${NC}
-
-10. ${RED}${BOLD}COPY THE TOKEN NOW${NC} - you won't see it again!
-
-${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}
-
-EOF
+  echo ""
+  echo -e "${BOLD}${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${BOLD}${CYAN}║  Cloudflare API Token Creation Guide                         ║${NC}"
+  echo -e "${BOLD}${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+  echo ""
+  echo "We need ONE comprehensive token that can manage everything."
+  echo ""
+  echo -e "${BOLD}Step-by-Step Instructions:${NC}"
+  echo ""
+  echo -e "1. Open in browser: ${CYAN}https://dash.cloudflare.com/profile/api-tokens${NC}"
+  echo ""
+  echo -e "2. Click ${BOLD}\"Create Token\"${NC}"
+  echo ""
+  echo -e "3. Click ${BOLD}\"Create Custom Token\"${NC} (NOT the templates)"
+  echo ""
+  echo -e "4. Token name: ${BOLD}\"Hardened VPS Management - ${domain}\"${NC}"
+  echo ""
+  echo -e "5. ${BOLD}Permissions:${NC} Add these (click \"+ Add more\"):"
+  echo ""
+  echo -e "   ${GREEN}✓${NC} Account | Cloudflare Tunnel | Edit"
+  echo -e "   ${GREEN}✓${NC} Zone | DNS | Edit"
+  echo -e "   ${GREEN}✓${NC} Zone | SSL and TLS | Edit"
+  echo -e "   ${GREEN}✓${NC} Zone | Zone Settings | Edit"
+  echo -e "   ${GREEN}✓${NC} Zone | Zone | Read"
+  echo ""
+  echo -e "6. ${BOLD}Zone Resources:${NC}"
+  echo -e "   Include | Specific zone | ${CYAN}${domain}${NC}"
+  echo ""
+  echo -e "7. ${BOLD}Client IP Address Filtering:${NC}"
+  echo "   Leave blank (or add your server IP for extra security)"
+  echo ""
+  echo -e "8. ${BOLD}TTL:${NC}"
+  echo "   Leave as default or set expiration"
+  echo ""
+  echo -e "9. Click ${BOLD}\"Continue to summary\"${NC} → ${BOLD}\"Create Token\"${NC}"
+  echo ""
+  echo -e "10. ${RED}${BOLD}COPY THE TOKEN NOW${NC} - you won't see it again!"
+  echo ""
+  echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo ""
 }
 
 # =================================================================
