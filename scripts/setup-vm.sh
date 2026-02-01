@@ -133,6 +133,58 @@ print_error() {
 }
 
 # =================================================================
+# SSH Key Validation
+# =================================================================
+
+validate_ssh_key() {
+  local key="$1"
+
+  # Remove leading/trailing whitespace
+  key=$(echo "$key" | xargs)
+
+  # Check if empty
+  if [ -z "$key" ]; then
+    return 1
+  fi
+
+  # Check if it starts with a valid key type
+  if [[ "$key" =~ ^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|ssh-dss)[[:space:]] ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+add_ssh_key_if_not_exists() {
+  local user="$1"
+  local key="$2"
+  local auth_keys_file="/home/$user/.ssh/authorized_keys"
+
+  # Validate key format
+  if ! validate_ssh_key "$key"; then
+    print_error "Invalid SSH key format for $user"
+    return 1
+  fi
+
+  # Create .ssh directory if it doesn't exist
+  mkdir -p "/home/$user/.ssh"
+  chmod 700 "/home/$user/.ssh"
+
+  # Check if key already exists
+  if [ -f "$auth_keys_file" ] && grep -qF "$key" "$auth_keys_file"; then
+    print_info "SSH key already exists for $user, skipping duplicate"
+    return 0
+  fi
+
+  # Add key
+  echo "$key" >> "$auth_keys_file"
+  chmod 600 "$auth_keys_file"
+  chown -R "$user:$user" "/home/$user/.ssh"
+
+  return 0
+}
+
+# =================================================================
 # Checkpoint System (for resumable setup)
 # =================================================================
 
@@ -311,17 +363,21 @@ else
   if id "$SYSADMIN_USER" &>/dev/null; then
     print_warning "User '$SYSADMIN_USER' already exists"
   else
-    adduser --disabled-password --gecos "System Administrator" "$SYSADMIN_USER"
+    # Create user with temporary password for immediate sudo access
+    adduser --gecos "System Administrator" "$SYSADMIN_USER"
     usermod -aG sudo "$SYSADMIN_USER"
     print_success "Created user '$SYSADMIN_USER' with sudo access"
+    print_info "Password will be locked after SSH key verification"
   fi
 
   # Create appmgr user (docker access only, no sudo)
   if id "$APPMGR_USER" &>/dev/null; then
     print_warning "User '$APPMGR_USER' already exists"
   else
-    adduser --disabled-password --gecos "Application Manager" "$APPMGR_USER"
+    # Create with password for consistency
+    adduser --gecos "Application Manager" "$APPMGR_USER"
     print_success "Created user '$APPMGR_USER' (no sudo)"
+    print_info "Password will be locked after SSH key verification"
   fi
 fi
 
@@ -338,25 +394,22 @@ else
   # Check if SSH keys are provided via environment variables (from setup.sh)
   if [ -n "${SYSADMIN_SSH_KEY:-}" ]; then
     echo "Using SSH key from environment variable for $SYSADMIN_USER"
-    mkdir -p "/home/$SYSADMIN_USER/.ssh"
-    chmod 700 "/home/$SYSADMIN_USER/.ssh"
-    echo "$SYSADMIN_SSH_KEY" > "/home/$SYSADMIN_USER/.ssh/authorized_keys"
-    chmod 600 "/home/$SYSADMIN_USER/.ssh/authorized_keys"
-    chown -R "$SYSADMIN_USER:$SYSADMIN_USER" "/home/$SYSADMIN_USER/.ssh"
-    print_success "SSH key added for $SYSADMIN_USER (from environment)"
+    if add_ssh_key_if_not_exists "$SYSADMIN_USER" "$SYSADMIN_SSH_KEY"; then
+      print_success "SSH key added for $SYSADMIN_USER (from environment)"
+    else
+      print_error "Failed to add SSH key for $SYSADMIN_USER"
+    fi
 
     # Setup appmgr with same key or specific key if provided
-    mkdir -p "/home/$APPMGR_USER/.ssh"
-    chmod 700 "/home/$APPMGR_USER/.ssh"
     if [ -n "${APPMGR_SSH_KEY:-}" ]; then
-      echo "$APPMGR_SSH_KEY" > "/home/$APPMGR_USER/.ssh/authorized_keys"
-      print_success "SSH key added for $APPMGR_USER (from environment)"
+      if add_ssh_key_if_not_exists "$APPMGR_USER" "$APPMGR_SSH_KEY"; then
+        print_success "SSH key added for $APPMGR_USER (from environment)"
+      fi
     else
-      echo "$SYSADMIN_SSH_KEY" > "/home/$APPMGR_USER/.ssh/authorized_keys"
-      print_success "SSH key added for $APPMGR_USER (same as sysadmin)"
+      if add_ssh_key_if_not_exists "$APPMGR_USER" "$SYSADMIN_SSH_KEY"; then
+        print_success "SSH key added for $APPMGR_USER (same as sysadmin)"
+      fi
     fi
-    chmod 600 "/home/$APPMGR_USER/.ssh/authorized_keys"
-    chown -R "$APPMGR_USER:$APPMGR_USER" "/home/$APPMGR_USER/.ssh"
   else
     # Interactive mode - prompt for keys
     echo "SSH public keys are required for both users."
@@ -366,37 +419,35 @@ else
 
     if [ "$ADD_KEYS" = "yes" ]; then
       # Setup for sysadmin
-      mkdir -p "/home/$SYSADMIN_USER/.ssh"
-      chmod 700 "/home/$SYSADMIN_USER/.ssh"
-
       echo ""
       echo "Paste the SSH public key for $SYSADMIN_USER:"
       read -r SYSADMIN_KEY_INPUT
-      echo "$SYSADMIN_KEY_INPUT" > "/home/$SYSADMIN_USER/.ssh/authorized_keys"
 
-      chmod 600 "/home/$SYSADMIN_USER/.ssh/authorized_keys"
-      chown -R "$SYSADMIN_USER:$SYSADMIN_USER" "/home/$SYSADMIN_USER/.ssh"
-      print_success "SSH key added for $SYSADMIN_USER"
+      # Validate and add key
+      if add_ssh_key_if_not_exists "$SYSADMIN_USER" "$SYSADMIN_KEY_INPUT"; then
+        print_success "SSH key added for $SYSADMIN_USER"
+      else
+        print_error "Invalid SSH key format. Please add manually later."
+      fi
 
       # Setup for appmgr
-      mkdir -p "/home/$APPMGR_USER/.ssh"
-      chmod 700 "/home/$APPMGR_USER/.ssh"
-
       echo ""
       echo "Paste the SSH public key for $APPMGR_USER:"
       echo "(Or press Enter to use the same key as $SYSADMIN_USER)"
       read -r APPMGR_KEY_INPUT
-      if [ -z "$APPMGR_KEY_INPUT" ]; then
-        echo "$SYSADMIN_KEY_INPUT" > "/home/$APPMGR_USER/.ssh/authorized_keys"
-        print_success "SSH key added for $APPMGR_USER (same as sysadmin)"
-      else
-        echo "$APPMGR_KEY_INPUT" > "/home/$APPMGR_USER/.ssh/authorized_keys"
-        print_success "SSH key added for $APPMGR_USER"
-      fi
 
-      chmod 600 "/home/$APPMGR_USER/.ssh/authorized_keys"
-      chown -R "$APPMGR_USER:$APPMGR_USER" "/home/$APPMGR_USER/.ssh"
-      print_success "SSH key added for $APPMGR_USER"
+      # Use sysadmin key if no input provided
+      if [ -z "$APPMGR_KEY_INPUT" ]; then
+        if add_ssh_key_if_not_exists "$APPMGR_USER" "$SYSADMIN_KEY_INPUT"; then
+          print_success "SSH key added for $APPMGR_USER (same as sysadmin)"
+        fi
+      else
+        if add_ssh_key_if_not_exists "$APPMGR_USER" "$APPMGR_KEY_INPUT"; then
+          print_success "SSH key added for $APPMGR_USER"
+        else
+          print_error "Invalid SSH key format. Please add manually later."
+        fi
+      fi
     else
       print_warning "Remember to add SSH keys before disabling password auth!"
     fi

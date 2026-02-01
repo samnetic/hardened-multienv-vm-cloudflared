@@ -220,6 +220,23 @@ test_ssh_access() {
 
   if confirm "Have you successfully logged in as ${SYSADMIN_USER} from another terminal?" "n"; then
     print_success "SSH access verified!"
+
+    # Offer to lock passwords now that SSH works
+    echo ""
+    echo -e "${CYAN}Now that SSH key auth works, lock user passwords?${NC}"
+    echo "  • Forces SSH-only authentication (more secure)"
+    echo "  • Passwords can still be used via cloud console (emergency access)"
+    echo ""
+
+    if confirm "Lock passwords for ${SYSADMIN_USER} and ${APPMGR_USER}?" "y"; then
+      sudo passwd -l "$SYSADMIN_USER" 2>/dev/null || true
+      sudo passwd -l "$APPMGR_USER" 2>/dev/null || true
+      print_success "Passwords locked - SSH-only authentication enforced"
+      print_info "To unlock: sudo passwd -u <username>"
+    else
+      print_info "Passwords remain active - remember to use strong passwords!"
+    fi
+
     return 0
   else
     print_error "Cannot proceed without verified SSH access!"
