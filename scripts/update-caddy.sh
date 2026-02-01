@@ -26,13 +26,20 @@ NC='\033[0m'
 # Determine Caddy directory
 if [ -n "${1:-}" ]; then
   CADDY_DIR="$1"
+elif [ -d "/srv/infrastructure/reverse-proxy" ]; then
+  CADDY_DIR="/srv/infrastructure/reverse-proxy"
 elif [ -d "/opt/infrastructure/infra/reverse-proxy" ]; then
   CADDY_DIR="/opt/infrastructure/infra/reverse-proxy"
 elif [ -d "/opt/hosting-blueprint/infra/reverse-proxy" ]; then
   CADDY_DIR="/opt/hosting-blueprint/infra/reverse-proxy"
-  echo -e "${YELLOW}⚠ Using template directory. Consider using /opt/infrastructure instead.${NC}"
+  echo -e "${YELLOW}⚠ Using template directory. Consider using /srv/infrastructure instead.${NC}"
 else
   echo -e "${RED}✗ Cannot find Caddy directory${NC}"
+  echo "Checked:"
+  echo "  - /srv/infrastructure/reverse-proxy"
+  echo "  - /opt/infrastructure/infra/reverse-proxy"
+  echo "  - /opt/hosting-blueprint/infra/reverse-proxy"
+  echo ""
   echo "Usage: $0 [CADDY_DIR]"
   exit 1
 fi
