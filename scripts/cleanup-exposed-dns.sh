@@ -237,16 +237,24 @@ main() {
     exit 0
   fi
 
-  # Show exposed records
+  # Show exposed records with numbers
   echo ""
   print_warning "Found A records exposing your VM IP:"
   echo ""
-  printf "  ${BOLD}%-30s %-20s ${RED}Status${NC}\n" "Name" "IP Address"
-  echo "  ────────────────────────────────────────────────────────────"
+  printf "  ${BOLD}%-4s %-30s %-20s ${RED}Status${NC}\n" "#" "Name" "IP Address"
+  echo "  ───────────────────────────────────────────────────────────────"
 
+  local index=1
+  declare -A RECORD_MAP
   while IFS='|' read -r record_id record_name record_content; do
-    printf "  %-30s %-20s ${RED}EXPOSED${NC}\n" "$record_name" "$record_content"
+    if [ -n "$record_id" ]; then
+      printf "  %-4s %-30s %-20s ${RED}EXPOSED${NC}\n" "$index" "$record_name" "$record_content"
+      RECORD_MAP[$index]="$record_id|$record_name|$record_content"
+      ((index++))
+    fi
   done <<< "$EXPOSED_RECORDS"
+
+  local TOTAL_RECORDS=$((index - 1))
 
   echo ""
   echo -e "${YELLOW}⚠ Security Risk:${NC}"
@@ -257,16 +265,54 @@ main() {
   print_info "All traffic should go through Cloudflare Tunnel (CNAME records)"
   echo ""
 
-  if ! confirm "Remove these A records?" "y"; then
-    print_warning "DNS records NOT removed"
-    echo ""
-    print_info "To remove manually:"
-    echo "  https://dash.cloudflare.com → $DOMAIN → DNS → Records"
-    exit 0
-  fi
+  # Selection menu
+  echo -e "${BOLD}Removal Options:${NC}"
+  echo "  1) Remove all exposed A records (recommended)"
+  echo "  2) Select individual records to remove"
+  echo "  3) Skip removal (manual cleanup later)"
+  echo ""
+  read -rp "Select option (1-3): " REMOVAL_OPTION
 
-  # Delete each exposed A record
-  print_step "Removing exposed A records..."
+  case "$REMOVAL_OPTION" in
+    1)
+      print_info "Will remove all $TOTAL_RECORDS exposed record(s)"
+      RECORDS_TO_REMOVE="$EXPOSED_RECORDS"
+      ;;
+    2)
+      echo ""
+      echo "Enter record numbers to remove (space-separated, e.g., 1 3 5):"
+      read -rp "> " SELECTED_NUMBERS
+
+      RECORDS_TO_REMOVE=""
+      for num in $SELECTED_NUMBERS; do
+        if [ -n "${RECORD_MAP[$num]}" ]; then
+          RECORDS_TO_REMOVE+="${RECORD_MAP[$num]}"$'\n'
+        else
+          print_warning "Invalid record number: $num (skipped)"
+        fi
+      done
+
+      if [ -z "$RECORDS_TO_REMOVE" ]; then
+        print_error "No valid records selected"
+        exit 1
+      fi
+      ;;
+    3)
+      print_warning "DNS records NOT removed"
+      echo ""
+      print_info "To remove manually:"
+      echo "  https://dash.cloudflare.com → $DOMAIN → DNS → Records"
+      exit 0
+      ;;
+    *)
+      print_error "Invalid option"
+      exit 1
+      ;;
+  esac
+
+  # Delete selected A records
+  echo ""
+  print_step "Removing selected A records..."
   REMOVED=0
   FAILED=0
 
@@ -294,10 +340,10 @@ main() {
 
     # Small delay between API calls
     sleep 0.5
-  done <<< "$EXPOSED_RECORDS"
+  done <<< "$RECORDS_TO_REMOVE"
 
   echo ""
-  print_header "Cleanup Complete"
+  print_header "A Record Cleanup Complete"
 
   if [ $REMOVED -gt 0 ]; then
     echo -e "${GREEN}✓ Removed $REMOVED A record(s)${NC}"
@@ -307,11 +353,140 @@ main() {
     echo -e "${RED}✗ Failed to remove $FAILED A record(s)${NC}"
   fi
 
+  # =================================================================
+  # Step 2: Add Missing CNAME Records
+  # =================================================================
+
+  if [ $REMOVED -gt 0 ]; then
+    echo ""
+    print_header "Step 2: Setup Tunnel Routing (CNAME Records)"
+
+    # Get tunnel ID from config
+    TUNNEL_ID=""
+    if [ -f "/etc/cloudflared/config.yml" ]; then
+      TUNNEL_ID=$(grep '^tunnel:' /etc/cloudflared/config.yml | awk '{print $2}')
+    fi
+
+    if [ -z "$TUNNEL_ID" ]; then
+      print_warning "Could not detect tunnel ID from /etc/cloudflared/config.yml"
+      echo ""
+      read -rp "Enter your Cloudflare Tunnel ID: " TUNNEL_ID
+
+      if [ -z "$TUNNEL_ID" ]; then
+        print_error "No tunnel ID provided - cannot create CNAME records"
+        echo ""
+        print_info "Find your tunnel ID:"
+        echo "  sudo cat /etc/cloudflared/config.yml | grep tunnel:"
+        echo ""
+        print_info "Then manually add CNAME records at:"
+        echo "  https://dash.cloudflare.com → $DOMAIN → DNS → Records"
+        exit 1
+      fi
+    fi
+
+    print_success "Tunnel ID: $TUNNEL_ID"
+    echo ""
+
+    # Check which CNAME records are missing
+    print_step "Checking existing CNAME records..."
+
+    REQUIRED_CNAMES=("@" "www" "*")
+    MISSING_CNAMES=()
+
+    for cname in "${REQUIRED_CNAMES[@]}"; do
+      # Query for existing CNAME record
+      EXISTING=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/dns_records?type=CNAME&name=${cname}.${DOMAIN}" \
+        -H "Authorization: Bearer $CF_API_TOKEN" \
+        -H "Content-Type: application/json")
+
+      # Special handling for root domain (@)
+      if [ "$cname" = "@" ]; then
+        EXISTING=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/dns_records?type=CNAME&name=${DOMAIN}" \
+          -H "Authorization: Bearer $CF_API_TOKEN" \
+          -H "Content-Type: application/json")
+      fi
+
+      if echo "$EXISTING" | grep -q '"count":0'; then
+        MISSING_CNAMES+=("$cname")
+        print_warning "Missing: $cname → ${TUNNEL_ID}.cfargotunnel.com"
+      else
+        print_success "Exists: $cname"
+      fi
+    done
+
+    # Add missing CNAME records
+    if [ ${#MISSING_CNAMES[@]} -gt 0 ]; then
+      echo ""
+      echo -e "${BOLD}Missing CNAME records:${NC}"
+      for cname in "${MISSING_CNAMES[@]}"; do
+        if [ "$cname" = "@" ]; then
+          echo "  • Root domain ($DOMAIN) → ${TUNNEL_ID}.cfargotunnel.com"
+        elif [ "$cname" = "*" ]; then
+          echo "  • Wildcard (*.$DOMAIN) → ${TUNNEL_ID}.cfargotunnel.com"
+        else
+          echo "  • $cname.$DOMAIN → ${TUNNEL_ID}.cfargotunnel.com"
+        fi
+      done
+
+      echo ""
+      if confirm "Add these CNAME records?" "y"; then
+        print_step "Adding CNAME records..."
+
+        for cname in "${MISSING_CNAMES[@]}"; do
+          CNAME_NAME="$cname"
+          if [ "$cname" = "@" ]; then
+            CNAME_NAME="$DOMAIN"
+          elif [ "$cname" = "*" ]; then
+            CNAME_NAME="*"
+          fi
+
+          RESPONSE=$(curl -s -X POST "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/dns_records" \
+            -H "Authorization: Bearer $CF_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data "{\"type\":\"CNAME\",\"name\":\"$CNAME_NAME\",\"content\":\"${TUNNEL_ID}.cfargotunnel.com\",\"proxied\":true}")
+
+          if echo "$RESPONSE" | grep -q '"success":true'; then
+            print_success "Added: $CNAME_NAME → ${TUNNEL_ID}.cfargotunnel.com"
+          else
+            print_error "Failed to add: $CNAME_NAME"
+            ERROR_MSG=$(echo "$RESPONSE" | grep -oP '"message":"\K[^"]+' || echo "Unknown error")
+            echo "  Error: $ERROR_MSG"
+          fi
+
+          sleep 0.5
+        done
+      else
+        print_warning "Skipped CNAME record creation"
+        echo ""
+        print_info "Add manually at:"
+        echo "  https://dash.cloudflare.com → $DOMAIN → DNS → Records"
+      fi
+    else
+      print_success "All required CNAME records exist!"
+    fi
+  fi
+
+  # =================================================================
+  # Final Summary
+  # =================================================================
+
+  echo ""
+  print_header "Setup Complete"
+
   if [ $REMOVED -gt 0 ] && [ $FAILED -eq 0 ]; then
+    echo -e "${GREEN}✓ Your VM IP is no longer exposed!${NC}"
+    echo -e "${GREEN}✓ All traffic now flows through Cloudflare Tunnel${NC}"
     echo ""
-    print_success "Your VM IP is no longer exposed!"
+
+    print_info "Your DNS configuration:"
+    echo "  • A records pointing to VM IP: ${GREEN}REMOVED${NC}"
+    echo "  • CNAME records pointing to tunnel: ${GREEN}ACTIVE${NC}"
     echo ""
-    print_info "All traffic now flows through Cloudflare Tunnel"
+
+    print_info "Test your setup:"
+    echo "  curl https://$DOMAIN"
+    echo "  curl https://www.$DOMAIN"
+    echo "  ssh ${DOMAIN%%.*}  # SSH via tunnel"
   fi
 
   echo ""
