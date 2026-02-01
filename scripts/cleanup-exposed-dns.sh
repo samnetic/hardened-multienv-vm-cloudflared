@@ -134,17 +134,48 @@ list_a_records_for_ip() {
     -H "Authorization: Bearer $token" \
     -H "Content-Type: application/json")
 
+  # Check if request succeeded
+  if ! echo "$records" | grep -q '"success":true'; then
+    print_error "Failed to fetch DNS records from Cloudflare API" >&2
+    echo "$records" | grep -oP '"message":"\K[^"]+' >&2 || true
+    return 1
+  fi
+
   # Parse JSON to find records pointing to target IP
   # Format: id|name|content
-  echo "$records" | grep -oP '"type":"A"[^}]+' | while read -r record; do
-    local record_id=$(echo "$record" | grep -oP '"id":"\K[^"]+' | head -1)
-    local record_name=$(echo "$record" | grep -oP '"name":"\K[^"]+' | head -1)
-    local record_content=$(echo "$record" | grep -oP '"content":"\K[^"]+' | head -1)
+  # Use Python if available (more robust), otherwise grep
+  if command -v python3 &> /dev/null; then
+    echo "$records" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    target_ip = '$target_ip'
+    for record in data.get('result', []):
+        if record.get('type') == 'A' and record.get('content') == target_ip:
+            print(f\"{record['id']}|{record['name']}|{record['content']}\")
+except Exception as e:
+    pass
+"
+  else
+    # Fallback to grep-based parsing (less robust but works without Python)
+    # Extract the "result" array and parse each record
+    local result_array=$(echo "$records" | grep -oP '"result":\[\K[^]]+(?=\])')
 
-    if [ "$record_content" = "$target_ip" ]; then
-      echo "$record_id|$record_name|$record_content"
+    if [ -z "$result_array" ]; then
+      return 0  # No records found
     fi
-  done
+
+    # Split by record objects and parse each
+    echo "$result_array" | grep -o '{[^}]*"type":"A"[^}]*}' | while IFS= read -r record; do
+      local record_id=$(echo "$record" | grep -oP '"id":"\K[^"]+')
+      local record_name=$(echo "$record" | grep -oP '"name":"\K[^"]+')
+      local record_content=$(echo "$record" | grep -oP '"content":"\K[^"]+')
+
+      if [ "$record_content" = "$target_ip" ]; then
+        echo "$record_id|$record_name|$record_content"
+      fi
+    done
+  fi
 }
 
 # =================================================================
