@@ -94,10 +94,18 @@ fi
 
 SSH_HOSTNAME="$1"
 SSH_USER="$2"
-SSH_ALIAS="${3:-${SSH_HOSTNAME%%.*}}"  # Default alias: first part of hostname
 
 # Extract domain from hostname (remove 'ssh.' prefix if present)
 DOMAIN="${SSH_HOSTNAME#ssh.}"
+
+# Default alias: domain name, plus user suffix if not sysadmin
+# Example: "codeagen" for sysadmin, "codeagen-appmgr" for appmgr
+BASE_ALIAS="${DOMAIN%%.*}"
+if [ "$SSH_USER" = "sysadmin" ]; then
+  SSH_ALIAS="${3:-$BASE_ALIAS}"
+else
+  SSH_ALIAS="${3:-${BASE_ALIAS}-${SSH_USER}}"
+fi
 
 # =================================================================
 # Detect OS
