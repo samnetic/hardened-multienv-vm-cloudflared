@@ -212,7 +212,7 @@ setup_github_secrets() {
   echo
 
   # SSH_HOST
-  read -p "Enter your VM's SSH hostname (e.g., ssh.example.com): " ssh_host
+  read -p "Enter your VM's SSH hostname (e.g., ssh.yourdomain.com): " ssh_host
   if [ -n "$ssh_host" ]; then
     if gh secret set SSH_HOST --body "$ssh_host" 2>/dev/null; then
       print_success "SSH_HOST set to: $ssh_host"

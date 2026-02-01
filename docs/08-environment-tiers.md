@@ -202,7 +202,7 @@ git checkout -b feature/user-avatars
 # Write code
 git push
 # → Auto-deploys to dev
-# Test at dev-app.example.com
+# Test at dev-app.yourdomain.com
 ```
 
 ### Day 2: Feature Complete
@@ -212,7 +212,7 @@ git push
 # Review, approve
 # Merge
 # → Auto-deploys to staging
-# Test at staging-app.example.com
+# Test at staging-app.yourdomain.com
 # QA approves
 ```
 
@@ -225,7 +225,7 @@ git push --tags
 # Manually trigger production deploy
 # Approve in review
 # → Deploys to production
-# Verify at app.example.com
+# Verify at app.yourdomain.com
 ```
 
 ## Environment-Specific Configuration

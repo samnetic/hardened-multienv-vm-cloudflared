@@ -85,7 +85,7 @@ SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."
 
 ```
 EMAIL_SENDER="netdata@yourdomain.com"
-DEFAULT_RECIPIENT_EMAIL="you@example.com"
+DEFAULT_RECIPIENT_EMAIL="you@yourdomain.com"
 ```
 
 ## Netdata Cloud (Optional)

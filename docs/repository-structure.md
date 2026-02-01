@@ -128,9 +128,9 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
 
           # Deploy
-          ssh -o ProxyCommand="./cloudflared access ssh --hostname ssh.codeagen.com" \
+          ssh -o ProxyCommand="./cloudflared access ssh --hostname ssh.yourdomain.com" \
               -o StrictHostKeyChecking=no \
-              appmgr@ssh.codeagen.com \
+              appmgr@ssh.yourdomain.com \
               "cd /srv/apps/production/my-app && git pull && docker compose up -d --build"
 ```
 
@@ -142,20 +142,20 @@ All routing lives in one place:
 
 ```caddyfile
 # Third-party apps (from infrastructure monorepo)
-http://n8n.codeagen.com {
+http://n8n.yourdomain.com {
     reverse_proxy n8n-prod:5678
 }
 
-http://portainer.codeagen.com {
+http://portainer.yourdomain.com {
     reverse_proxy portainer-prod:9000
 }
 
 # Custom apps (from separate repos)
-http://api.codeagen.com {
+http://api.yourdomain.com {
     reverse_proxy my-api-prod:3000
 }
 
-http://app.codeagen.com {
+http://app.yourdomain.com {
     reverse_proxy my-nextjs-app-prod:3000
 }
 ```

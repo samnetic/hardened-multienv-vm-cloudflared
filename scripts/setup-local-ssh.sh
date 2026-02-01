@@ -12,7 +12,7 @@
 #
 # Usage:
 #   # Download and run directly:
-#   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.codeagen.com sysadmin ~/.ssh/id_rsa
+#   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin ~/.ssh/id_rsa
 #
 #   # Or download, review, then run:
 #   wget https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh
@@ -91,8 +91,8 @@ if [ $# -lt 2 ]; then
   echo "Usage: $0 ssh.yourdomain.com username [identity_file]"
   echo ""
   echo "Example:"
-  echo "  $0 ssh.codeagen.com sysadmin ~/.ssh/id_rsa"
-  echo "  $0 ssh.codeagen.com sysadmin  # Auto-detect identity file"
+  echo "  $0 ssh.yourdomain.com sysadmin ~/.ssh/id_rsa"
+  echo "  $0 ssh.yourdomain.com sysadmin  # Auto-detect identity file"
   exit 1
 fi
 

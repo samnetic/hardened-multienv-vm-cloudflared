@@ -11,7 +11,7 @@
 #
 # Usage:
 #   source ./scripts/cloudflare-api-setup.sh
-#   setup_cloudflare_api "codeagen.com"
+#   setup_cloudflare_api "yourdomain.com"
 # =================================================================
 
 # Colors

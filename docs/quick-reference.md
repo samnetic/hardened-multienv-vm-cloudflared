@@ -1,4 +1,4 @@
-# Quick Reference - codeagen.com Setup
+# Quick Reference
 
 Fast reference for common tasks on your VM.
 
@@ -16,7 +16,7 @@ Fast reference for common tasks on your VM.
 
 ### 1. Update Template Scripts
 ```bash
-ssh sysadmin@ssh.codeagen.com
+ssh sysadmin@ssh.yourdomain.com
 cd /opt/hosting-blueprint
 git pull origin master
 ```
@@ -36,19 +36,19 @@ cp /opt/hosting-blueprint/.gitignore /opt/infrastructure/
 cd /opt/infrastructure
 git init
 git add .
-git commit -m "Initial infrastructure for codeagen.com"
+git commit -m "Initial infrastructure setup"
 
 # Link to GitHub (create repo first on GitHub)
-git remote add origin https://github.com/YOUR_USERNAME/codeagen-infrastructure.git
+git remote add origin https://github.com/YOUR_USERNAME/myproject-infrastructure.git
 git push -u origin main
 ```
 
-### 3. Configure Caddy for codeagen.com
+### 3. Configure Caddy with Your Domain
 ```bash
 cd /opt/infrastructure/infra/reverse-proxy
 
-# Update domain
-sed -i 's/yourdomain.com/codeagen.com/g' Caddyfile
+# Update domain (replace example.com with YOUR domain)
+sed -i 's/yourdomain.com/example.com/g' Caddyfile
 
 # Safely apply
 sudo /opt/hosting-blueprint/scripts/update-caddy.sh
@@ -119,7 +119,7 @@ docker compose logs -f
 vim /opt/infrastructure/infra/reverse-proxy/Caddyfile
 
 # Add:
-http://myapp.codeagen.com {
+http://myapp.yourdomain.com {
   import security_headers
   reverse_proxy app-myapp:8080 {
     import proxy_headers
@@ -133,20 +133,20 @@ sudo /opt/hosting-blueprint/scripts/update-caddy.sh
 ### Add DNS in Cloudflare
 
 1. Go to: https://dash.cloudflare.com
-2. Select: codeagen.com
+2. Select: yourdomain.com
 3. DNS → Add record:
    - **Type:** CNAME
    - **Name:** myapp (or dev-app, staging-app, etc.)
    - **Target:** `<your-tunnel-id>.cfargotunnel.com`
    - **Proxy:** ON (orange cloud)
 4. Wait 1-2 minutes for DNS propagation
-5. Test: `curl https://myapp.codeagen.com`
+5. Test: `curl https://myapp.yourdomain.com`
 
 ## 🔐 Security Checks
 
 ### Check DNS Exposure
 ```bash
-sudo /opt/hosting-blueprint/scripts/check-dns-exposure.sh codeagen.com
+sudo /opt/hosting-blueprint/scripts/check-dns-exposure.sh yourdomain.com
 ```
 
 ### Verify Setup
@@ -194,7 +194,7 @@ docker compose -f /opt/infrastructure/apps/myapp/compose.yml restart
 
 ### Basic App
 ```caddyfile
-http://app.codeagen.com {
+http://app.yourdomain.com {
   import security_headers
   reverse_proxy app-production:80 {
     import proxy_headers
@@ -204,7 +204,7 @@ http://app.codeagen.com {
 
 ### API with CORS
 ```caddyfile
-http://api.codeagen.com {
+http://api.yourdomain.com {
   import security_headers
 
   header {
@@ -220,7 +220,7 @@ http://api.codeagen.com {
 
 ### Static Files
 ```caddyfile
-http://static.codeagen.com {
+http://static.yourdomain.com {
   import security_headers
   root * /srv/static
   file_server
@@ -229,8 +229,8 @@ http://static.codeagen.com {
 
 ### Redirect
 ```caddyfile
-http://old.codeagen.com {
-  redir https://new.codeagen.com{uri} permanent
+http://old.yourdomain.com {
+  redir https://new.yourdomain.com{uri} permanent
 }
 ```
 
@@ -313,12 +313,12 @@ uptime
 
 3. **Check DNS:**
    ```bash
-   dig myapp.codeagen.com
+   dig myapp.yourdomain.com
    ```
 
 4. **Test locally:**
    ```bash
-   curl -H "Host: myapp.codeagen.com" http://localhost
+   curl -H "Host: myapp.yourdomain.com" http://localhost
    ```
 
 ### Caddy Won't Start
@@ -351,7 +351,7 @@ uptime
 
 2. **Check DNS:**
    ```bash
-   dig ssh.codeagen.com
+   dig ssh.yourdomain.com
    ```
 
 3. **Test tunnel route:**
@@ -375,7 +375,7 @@ uptime
 ## 💡 Pro Tips
 
 1. **Always use the update-caddy.sh script** - it prevents outages
-2. **Test in dev first** - use dev-app.codeagen.com for testing
+2. **Test in dev first** - use dev-app.yourdomain.com for testing
 3. **Commit Caddy changes** - version control your infrastructure
 4. **Keep backups** - automatic backups are in backups/ folder
 5. **Monitor logs** - check logs after making changes

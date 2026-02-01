@@ -233,10 +233,10 @@ SSH keys provide secure authentication. We'll create/select keys on your **local
 # On your LOCAL MACHINE (not the VM)
 
 # Generate ed25519 key (modern, secure)
-ssh-keygen -t ed25519 -C "your-email@example.com"
+ssh-keygen -t ed25519 -C "your-email@yourdomain.com"
 
 # Or generate RSA 4096 key (more compatible)
-ssh-keygen -t rsa -b 4096 -C "your-email@example.com"
+ssh-keygen -t rsa -b 4096 -C "your-email@yourdomain.com"
 ```
 
 **Prompts:**
@@ -275,7 +275,7 @@ cat ~/.ssh/id_rsa.pub
 
 Example output:
 ```
-ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAbcdefghijklmnopqrstuvwxyz your-email@example.com
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAbcdefghijklmnopqrstuvwxyz your-email@yourdomain.com
 ```
 
 **Keep this terminal open** - you'll need to copy this key again.

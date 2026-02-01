@@ -1,13 +1,13 @@
-# Getting Started - codeagen.com
+# Getting Started
 
 Quick start guide for setting up your infrastructure on an existing VM with cloudflared already configured.
 
 ## ✅ Prerequisites
 
 You already have:
-- ✅ Oracle OCI VM running
+- ✅ VM running (Oracle Cloud, AWS, GCP, DigitalOcean, Hetzner, etc.)
 - ✅ Cloudflared tunnel set up
-- ✅ SSH access via `ssh.codeagen.com`
+- ✅ SSH access via tunnel (e.g., `ssh.yourdomain.com`)
 - ✅ Domain configured in Cloudflare
 
 ## 🚀 One-Command Setup
@@ -15,14 +15,14 @@ You already have:
 SSH to your VM and run:
 
 ```bash
-ssh sysadmin@ssh.codeagen.com
+ssh sysadmin@ssh.yourdomain.com
 
 # Update template scripts
 cd /opt/hosting-blueprint
 git pull origin master
 
 # Set up infrastructure (automated)
-sudo /opt/hosting-blueprint/scripts/setup-infrastructure-repo.sh codeagen.com codeagen-infrastructure
+sudo /opt/hosting-blueprint/scripts/setup-infrastructure-repo.sh yourdomain.com myproject-infrastructure
 ```
 
 This will:
@@ -93,7 +93,7 @@ docker compose up -d
 vim /srv/infrastructure/reverse-proxy/Caddyfile
 
 # Add this block:
-http://myapp.codeagen.com {
+http://myapp.yourdomain.com {
   import security_headers
   reverse_proxy app-myapp:8080 {
     import proxy_headers
@@ -110,7 +110,7 @@ sudo /opt/hosting-blueprint/scripts/update-caddy.sh
 # Proxy: ON (orange cloud)
 
 # 7. Test
-curl https://myapp.codeagen.com
+curl https://myapp.yourdomain.com
 ```
 
 ## 🌐 DNS Configuration
@@ -133,7 +133,7 @@ Your Cloudflare DNS should have:
 After setup, verify zero-trust security:
 
 ```bash
-sudo /opt/hosting-blueprint/scripts/check-dns-exposure.sh codeagen.com
+sudo /opt/hosting-blueprint/scripts/check-dns-exposure.sh yourdomain.com
 ```
 
 This checks if your VM IP is exposed via DNS A records.
@@ -204,12 +204,12 @@ docker system prune -a  # Remove unused images
 
 3. **Check DNS:**
    ```bash
-   dig myapp.codeagen.com
+   dig myapp.yourdomain.com
    ```
 
 4. **Test locally:**
    ```bash
-   curl -H "Host: myapp.codeagen.com" http://localhost
+   curl -H "Host: myapp.yourdomain.com" http://localhost
    ```
 
 ### Caddy Config Error

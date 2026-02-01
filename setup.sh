@@ -292,8 +292,8 @@ collect_config() {
 
   # Domain
   echo ""
-  echo "Enter your domain name (e.g., example.com)"
-  echo "This will be used for app subdomains like app.example.com"
+  echo "Enter your domain name (e.g., yourdomain.com)"
+  echo "This will be used for app subdomains like app.yourdomain.com"
   if [ "$resuming" = true ] && [ -n "${DOMAIN:-}" ]; then
     read -rp "Domain [$DOMAIN]: " domain_input
     DOMAIN=${domain_input:-$DOMAIN}

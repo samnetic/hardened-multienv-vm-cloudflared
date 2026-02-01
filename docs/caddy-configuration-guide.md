@@ -2,16 +2,16 @@
 
 Safe workflow for editing Caddy reverse proxy configuration without causing outages.
 
-## Quick Start for Your Setup (codeagen.com)
+## Quick Start
 
 ### 1. Update Domain in Caddyfile
 
 ```bash
-cd /opt/hosting-blueprint/infra/reverse-proxy
+cd /srv/infrastructure/reverse-proxy
 nano Caddyfile  # or vim
 
-# Replace all instances of yourdomain.com with codeagen.com
-# Use search and replace: :%s/yourdomain.com/codeagen.com/g (in vim)
+# Replace all instances of yourdomain.com with YOUR actual domain
+# Example in vim: :%s/yourdomain.com/example.com/g
 ```
 
 ### 2. Validate and Apply Safely
@@ -73,7 +73,7 @@ docker compose logs caddy --tail 20
 
 ```caddyfile
 # Add this to Caddyfile
-http://myapp.codeagen.com {
+http://myapp.yourdomain.com {
   import security_headers
 
   reverse_proxy app-myapp:8080 {
@@ -93,7 +93,7 @@ http://myapp.codeagen.com {
 ### Example 2: Static File Server
 
 ```caddyfile
-http://static.codeagen.com {
+http://static.yourdomain.com {
   import security_headers
   root * /srv/static
   file_server
@@ -103,7 +103,7 @@ http://static.codeagen.com {
 ### Example 3: API with CORS
 
 ```caddyfile
-http://api.codeagen.com {
+http://api.yourdomain.com {
   import security_headers
 
   # CORS headers for API
@@ -122,11 +122,11 @@ http://api.codeagen.com {
 ### Example 4: Redirect Base Domain to www
 
 ```caddyfile
-http://codeagen.com {
-  redir https://www.codeagen.com{uri} permanent
+http://yourdomain.com {
+  redir https://www.yourdomain.com{uri} permanent
 }
 
-http://www.codeagen.com {
+http://www.yourdomain.com {
   import security_headers
   reverse_proxy app-production:80 {
     import proxy_headers
@@ -134,25 +134,25 @@ http://www.codeagen.com {
 }
 ```
 
-## Current Configuration for codeagen.com
+## Expected Configuration Structure
 
-After updating, your Caddyfile should have:
+After updating with your domain, your Caddyfile should have routes like:
 
 ```caddyfile
 # DEV
-http://dev-app.codeagen.com → app-dev:80
+http://dev-app.yourdomain.com → app-dev:80
 
 # STAGING
-http://staging-app.codeagen.com → app-staging:80
+http://staging-app.yourdomain.com → app-staging:80
 
 # PRODUCTION
-http://app.codeagen.com → app-production:80
+http://app.yourdomain.com → app-production:80
 
 # Base domain
-http://codeagen.com → landing page or redirect
+http://yourdomain.com → landing page or redirect
 
 # Catch-all
-http://*.codeagen.com → 404 for unconfigured subdomains
+http://*.yourdomain.com → 404 for unconfigured subdomains
 ```
 
 ## Testing Configuration
@@ -169,10 +169,10 @@ docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
 
 ```bash
 # Test from VM
-curl -H "Host: dev-app.codeagen.com" http://localhost
+curl -H "Host: dev-app.yourdomain.com" http://localhost
 
 # Test from outside (after DNS is configured)
-curl https://dev-app.codeagen.com
+curl https://dev-app.yourdomain.com
 ```
 
 ### 3. Check Logs
@@ -213,7 +213,7 @@ sudo lsof -i :443
 ### Error: App not accessible
 
 **Check:**
-1. DNS CNAME points to tunnel: `dig dev-app.codeagen.com`
+1. DNS CNAME points to tunnel: `dig dev-app.yourdomain.com`
 2. Cloudflare proxy enabled (orange cloud)
 3. Docker container running: `docker ps | grep app-dev`
 4. Container on correct network: `docker inspect app-dev | grep Network`
@@ -258,14 +258,14 @@ Caddy is **sensitive to indentation**:
 
 ```caddyfile
 # CORRECT
-http://example.com {
+http://yourdomain.com {
   reverse_proxy app:80 {
     header_up X-Real-IP {remote_host}
   }
 }
 
 # WRONG (inconsistent indentation)
-http://example.com {
+http://yourdomain.com {
 reverse_proxy app:80 {
   header_up X-Real-IP {remote_host}
   }
@@ -304,11 +304,11 @@ docker compose logs caddy | grep ERROR
 
 ## Next Steps
 
-1. Update Caddyfile with codeagen.com domain
+1. Update Caddyfile with yourdomain.com domain
 2. Validate and reload: `sudo /opt/hosting-blueprint/scripts/update-caddy.sh`
 3. Create your first app in `apps/` directory
 4. Point subdomain to tunnel in Cloudflare dashboard
-5. Test: `curl https://dev-app.codeagen.com`
+5. Test: `curl https://dev-app.yourdomain.com`
 
 ## Reference
 

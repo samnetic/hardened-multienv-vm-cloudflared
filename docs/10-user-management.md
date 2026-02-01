@@ -44,7 +44,7 @@ usermod -aG docker appmgr
 ```bash
 # For sysadmin (your personal key)
 sudo mkdir -p /home/sysadmin/.ssh
-echo "ssh-ed25519 AAAA... your-email@example.com" | sudo tee /home/sysadmin/.ssh/authorized_keys
+echo "ssh-ed25519 AAAA... your-email@yourdomain.com" | sudo tee /home/sysadmin/.ssh/authorized_keys
 sudo chown -R sysadmin:sysadmin /home/sysadmin/.ssh
 sudo chmod 700 /home/sysadmin/.ssh
 sudo chmod 600 /home/sysadmin/.ssh/authorized_keys
@@ -154,7 +154,7 @@ groups username
 
 ```bash
 # Generate Ed25519 key (recommended)
-ssh-keygen -t ed25519 -C "your-email@example.com"
+ssh-keygen -t ed25519 -C "your-email@yourdomain.com"
 
 # For CI/CD, generate without passphrase
 ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/deploy_key -N ""

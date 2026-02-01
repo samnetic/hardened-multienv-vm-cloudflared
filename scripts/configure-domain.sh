@@ -5,8 +5,8 @@
 # Sets the primary domain across all configuration files.
 #
 # Usage:
-#   ./configure-domain.sh example.com
-#   ./configure-domain.sh example.com --hostname myserver
+#   ./configure-domain.sh yourdomain.com
+#   ./configure-domain.sh yourdomain.com --hostname myserver
 # =================================================================
 
 set -euo pipefail
@@ -28,15 +28,15 @@ if [ -z "$DOMAIN" ]; then
   echo "Usage: $0 <domain> [--hostname <name>]"
   echo ""
   echo "Examples:"
-  echo "  $0 example.com"
-  echo "  $0 example.com --hostname prod-server"
+  echo "  $0 yourdomain.com"
+  echo "  $0 yourdomain.com --hostname prod-server"
   exit 1
 fi
 
 # Validate domain format (requires at least one dot, no consecutive dots/hyphens)
 if [[ ! "$DOMAIN" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$ ]]; then
   echo -e "${RED}Error: Invalid domain format '${DOMAIN}'${NC}"
-  echo "Domain must be a valid format like 'example.com' or 'sub.example.com'"
+  echo "Domain must be a valid format like 'yourdomain.com' or 'sub.yourdomain.com'"
   echo "  - Must contain at least one dot"
   echo "  - Can only contain letters, numbers, dots, and hyphens"
   echo "  - Cannot start or end with a hyphen or dot"

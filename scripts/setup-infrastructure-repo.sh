@@ -5,7 +5,7 @@
 #
 # Usage:
 #   sudo ./scripts/setup-infrastructure-repo.sh [domain] [github-repo-name]
-#   sudo ./scripts/setup-infrastructure-repo.sh codeagen.com codeagen-infrastructure
+#   sudo ./scripts/setup-infrastructure-repo.sh yourdomain.com myproject-infrastructure
 #
 # This script (run once on VM):
 # 1. Creates /srv directory structure
@@ -88,7 +88,7 @@ elif [ -f "/opt/vm-config/setup.conf" ]; then
 fi
 
 if [ -z "${DOMAIN:-}" ]; then
-  read -rp "Enter your domain (e.g., codeagen.com): " DOMAIN
+  read -rp "Enter your domain (e.g., yourdomain.com): " DOMAIN
   while [ -z "$DOMAIN" ]; do
     print_warning "Domain is required"
     read -rp "Domain: " DOMAIN

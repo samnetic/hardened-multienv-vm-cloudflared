@@ -42,7 +42,7 @@ Proper organization for template setup scripts vs. your running infrastructure.
 /opt/infrastructure/
 ├── infra/
 │   ├── reverse-proxy/
-│   │   ├── Caddyfile          # ← Edit this for codeagen.com
+│   │   ├── Caddyfile          # ← Edit this for yourdomain.com
 │   │   ├── compose.yml
 │   │   ├── logs/
 │   │   └── backups/           # Auto-created by update-caddy.sh
@@ -101,11 +101,11 @@ cp /opt/hosting-blueprint/.gitignore /opt/infrastructure/
 cd /opt/infrastructure
 git init
 git add .
-git commit -m "Initial infrastructure for codeagen.com"
+git commit -m "Initial infrastructure setup"
 
 # Create GitHub repo and push
-gh repo create codeagen-infrastructure --private
-git remote add origin https://github.com/YOUR_USERNAME/codeagen-infrastructure.git
+gh repo create myproject-infrastructure --private
+git remote add origin https://github.com/YOUR_USERNAME/myproject-infrastructure.git
 git push -u origin main
 ```
 
@@ -115,11 +115,11 @@ git push -u origin main
 cd /opt/infrastructure/infra/reverse-proxy
 
 # Update domain
-sed -i 's/yourdomain.com/codeagen.com/g' Caddyfile
+sed -i 's/yourdomain.com/example.com/g' Caddyfile  # Replace with YOUR domain
 
 # Commit changes
 git add Caddyfile
-git commit -m "Configure for codeagen.com"
+git commit -m "Configure domain"
 git push
 ```
 
@@ -164,7 +164,7 @@ exec /opt/hosting-blueprint/scripts/update-caddy.sh \
 
 ```bash
 # Run from anywhere
-sudo /opt/hosting-blueprint/scripts/check-dns-exposure.sh codeagen.com
+sudo /opt/hosting-blueprint/scripts/check-dns-exposure.sh yourdomain.com
 ```
 
 ### Prepare SSH Keys (Local Machine)
@@ -202,9 +202,9 @@ graph LR
 ```
 
 ### Branches:
-- `dev` → deploys to dev-app.codeagen.com
-- `staging` → deploys to staging-app.codeagen.com
-- `main` → deploys to app.codeagen.com
+- `dev` → deploys to dev-app.yourdomain.com
+- `staging` → deploys to staging-app.yourdomain.com
+- `main` → deploys to app.yourdomain.com
 
 ## Configuration Management
 

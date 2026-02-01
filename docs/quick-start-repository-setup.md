@@ -201,9 +201,9 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
 
           # Deploy
-          ssh -o ProxyCommand="./cloudflared access ssh --hostname ssh.codeagen.com" \
+          ssh -o ProxyCommand="./cloudflared access ssh --hostname ssh.yourdomain.com" \
               -o StrictHostKeyChecking=no \
-              appmgr@ssh.codeagen.com \
+              appmgr@ssh.yourdomain.com \
               "cd /srv/apps/production/my-app && git pull && docker compose up -d --build"
 ```
 
@@ -255,7 +255,7 @@ my-nextjs-app/           # Independent versioning
 ## SSL Certificates (Zero Manual Work)
 
 ✅ Cloudflare provisions FREE wildcard SSL automatically
-✅ Covers `*.codeagen.com` - ALL subdomains
+✅ Covers `*.yourdomain.com` - ALL subdomains
 ✅ Automatic renewal - NEVER expires
 ✅ No cert files to manage
 

@@ -84,7 +84,7 @@ if [ -z "$SSH_HOSTNAME" ]; then
   echo ""
   echo "Examples:"
   echo "  $0 ssh.yourdomain.com sysadmin"
-  echo "  $0 ssh.example.com appmgr"
+  echo "  $0 ssh.yourdomain.com appmgr"
   echo ""
   echo "This script tests SSH connectivity via Cloudflare Tunnel"
   echo "to verify it's working before closing the direct SSH port."

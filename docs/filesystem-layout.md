@@ -60,7 +60,7 @@ Where to put your infrastructure files according to Linux FHS (Filesystem Hierar
 /var/lib/docker/          # Docker volumes (automatic)
 ```
 
-## Recommended Layout for codeagen.com
+## Recommended Layout
 
 ### Complete Directory Tree
 
@@ -144,17 +144,17 @@ cp -r /opt/hosting-blueprint/apps/* /srv/apps/
 
 # 3. Configure for your domain
 cd /srv/infrastructure/reverse-proxy
-sed -i 's/yourdomain.com/codeagen.com/g' Caddyfile
+sed -i 's/yourdomain.com/example.com/g' Caddyfile  # Replace with YOUR domain
 
 # 4. Initialize git repository
 cd /srv/infrastructure
 git init
 git add .
-git commit -m "Initial infrastructure for codeagen.com"
+git commit -m "Initial infrastructure setup"
 
 # Optional: Push to GitHub
-gh repo create codeagen-infrastructure --private
-git remote add origin https://github.com/YOUR_USERNAME/codeagen-infrastructure.git
+gh repo create myproject-infrastructure --private
+git remote add origin https://github.com/YOUR_USERNAME/myproject-infrastructure.git
 git push -u origin main
 
 # 5. Start Caddy
@@ -314,7 +314,7 @@ git commit -m "Update configuration"
 git push
 ```
 
-- **Remote:** Your own repo (e.g., codeagen-infrastructure)
+- **Remote:** Your own repo (e.g., myproject-infrastructure)
 - **Purpose:** Your infrastructure as code
 - **Workflow:** Full git workflow (add, commit, push)
 
@@ -342,7 +342,7 @@ sudo mkdir -p /srv/static/myapp
 sudo chown -R sysadmin:sysadmin /srv/static
 
 # In Caddyfile
-http://static.codeagen.com {
+http://static.yourdomain.com {
   root * /srv/static/myapp
   file_server
 }
@@ -350,7 +350,7 @@ http://static.codeagen.com {
 
 ## Summary
 
-**Recommended for codeagen.com:**
+**Recommended structure:**
 
 | Path | Purpose | Git Tracked? | Who Edits? |
 |------|---------|--------------|------------|
