@@ -271,57 +271,31 @@ EOF
   # =================================================================
   print_header "Step 5.5/7: Configure Cloudflare SSL/TLS (Optional)"
 
-  echo "To automate SSL/TLS configuration, you need a Cloudflare API token"
+  echo "Cloudflare API configuration allows automatic setup of SSL/TLS settings"
   echo ""
-  echo "Create one at: https://dash.cloudflare.com/profile/api-tokens"
-  echo "  Template: Edit zone DNS"
-  echo "  Permissions: Zone.SSL and TLS (Edit), Zone.Zone (Read)"
-  echo "  Zone Resources: Include → Specific zone → $DOMAIN"
-  echo ""
+  read -rp "Configure Cloudflare settings via API? (yes/no): " CONFIGURE_CF_API
 
-  read -rp "Do you have a Cloudflare API token? (yes/no): " HAS_API_TOKEN
+  SSL_CONFIGURED=false
+  if [ "$CONFIGURE_CF_API" = "yes" ]; then
+    # Source the Cloudflare API helper
+    SCRIPT_DIR_CF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    source "$SCRIPT_DIR_CF/cloudflare-api-setup.sh"
 
-  if [ "$HAS_API_TOKEN" = "yes" ]; then
-    read -rsp "Enter your Cloudflare API token: " CF_API_TOKEN
-    echo ""
+    # Setup API token (creates if needed, loads if exists)
+    if setup_cloudflare_api "$DOMAIN"; then
+      # Token is now in CF_API_TOKEN and Zone ID in CF_ZONE_ID (exported by setup function)
 
-    if [ -z "$CF_API_TOKEN" ]; then
-      print_warning "No API token provided, skipping SSL/TLS configuration"
+      # Configure SSL/TLS settings
+      echo ""
+      configure_ssl_settings "$CF_ZONE_ID" "$CF_API_TOKEN"
+      SSL_CONFIGURED=true
+      echo ""
+      print_success "Cloudflare SSL/TLS configuration complete!"
     else
-      print_step "Getting Zone ID for $DOMAIN..."
-
-      # Get Zone ID
-      ZONE_RESPONSE=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones?name=$DOMAIN" \
-        -H "Authorization: Bearer $CF_API_TOKEN" \
-        -H "Content-Type: application/json")
-
-      ZONE_ID=$(echo "$ZONE_RESPONSE" | grep -oP '"id":"\K[^"]+' | head -1)
-
-      if [ -z "$ZONE_ID" ]; then
-        print_error "Failed to get Zone ID"
-        print_info "API Response: $ZONE_RESPONSE"
-        print_warning "Skipping SSL/TLS configuration - you can set manually in Cloudflare dashboard"
-      else
-        print_success "Zone ID: $ZONE_ID"
-
-        print_step "Setting SSL/TLS mode to Flexible..."
-
-        SSL_RESPONSE=$(curl -s -X PATCH "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/settings/ssl" \
-          -H "Authorization: Bearer $CF_API_TOKEN" \
-          -H "Content-Type: application/json" \
-          --data '{"value":"flexible"}')
-
-        if echo "$SSL_RESPONSE" | grep -q '"success":true'; then
-          print_success "SSL/TLS mode set to Flexible"
-        else
-          print_error "Failed to set SSL/TLS mode"
-          print_info "API Response: $SSL_RESPONSE"
-          print_warning "Set manually: Cloudflare Dashboard → SSL/TLS → Overview → Flexible"
-        fi
-      fi
+      print_warning "API setup failed, skipping SSL/TLS configuration"
     fi
   else
-    print_info "Skipping SSL/TLS auto-configuration"
+    print_info "Skipping Cloudflare API configuration"
     echo ""
     print_warning "Remember to set SSL/TLS mode manually:"
     echo "  Cloudflare Dashboard → SSL/TLS → Overview → Encryption mode: Flexible"
@@ -403,14 +377,18 @@ EOF
   echo "   ${CYAN}ℹ Cloudflare automatically provisions FREE SSL certs for *.${DOMAIN}${NC}"
   echo "   ${CYAN}ℹ No manual cert management needed - everything is automatic!${NC}"
   echo ""
-  if [ "$HAS_API_TOKEN" != "yes" ]; then
-    echo -e "2. ${BOLD}Set SSL/TLS Mode to Flexible${NC}"
-    echo "   ${YELLOW}⚠ MANUAL STEP REQUIRED${NC}"
-    echo "   Go to: SSL/TLS → Overview → Encryption mode: Flexible"
+  if [ "$SSL_CONFIGURED" = true ]; then
+    echo -e "2. ${BOLD}SSL/TLS Configuration${NC}"
+    echo "   ${GREEN}✓ Configured automatically!${NC}"
+    echo "     • Flexible mode enabled"
+    echo "     • Always Use HTTPS enabled"
+    echo "     • Automatic HTTPS Rewrites enabled"
     echo ""
   else
-    echo -e "2. ${BOLD}SSL/TLS Configuration${NC}"
-    echo "   ${GREEN}✓ Already configured (Flexible mode)${NC}"
+    echo -e "2. ${BOLD}Set SSL/TLS Mode to Flexible${NC}"
+    echo "   ${YELLOW}⚠ MANUAL STEP REQUIRED${NC}"
+    echo "   Go to: https://dash.cloudflare.com → $DOMAIN → SSL/TLS"
+    echo "   Set Encryption mode to: Flexible"
     echo ""
   fi
   echo -e "3. ${BOLD}Set Up Local Machine for Tunnel SSH${NC}"
