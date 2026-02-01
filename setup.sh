@@ -165,19 +165,19 @@ check_resources() {
 check_network() {
   print_step "Checking network connectivity..."
 
-  # Try multiple DNS servers in case one is blocked
-  local DNS_SERVERS=("8.8.8.8" "1.1.1.1" "9.9.9.9")
+  # Try multiple endpoints (using curl instead of ping for Oracle Cloud compatibility)
+  local TEST_URLS=("https://www.cloudflare.com" "https://www.google.com" "https://www.github.com")
   local CONNECTED=false
 
-  for dns in "${DNS_SERVERS[@]}"; do
-    if ping -c 1 -W 5 "$dns" &> /dev/null; then
+  for url in "${TEST_URLS[@]}"; do
+    if curl -s --connect-timeout 5 "$url" > /dev/null 2>&1; then
       CONNECTED=true
       break
     fi
   done
 
   if [ "$CONNECTED" != "true" ]; then
-    print_error "No internet connectivity (tried ${DNS_SERVERS[*]})"
+    print_error "No internet connectivity (tried ${TEST_URLS[*]})"
     exit 1
   fi
   print_success "Network connected"
