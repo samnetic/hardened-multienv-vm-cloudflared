@@ -219,7 +219,24 @@ test_ssh_access() {
   echo ""
 
   if confirm "Have you successfully logged in as ${SYSADMIN_USER} from another terminal?" "n"; then
-    print_success "SSH access verified!"
+    print_success "SSH access verified for ${SYSADMIN_USER}!"
+
+    # Test appmgr access too
+    echo ""
+    echo -e "${YELLOW}Now test ${APPMGR_USER} access (used for CI/CD):${NC}"
+    echo ""
+    echo -e "${CYAN}  ssh ${APPMGR_USER}@YOUR_SERVER_IP${NC}"
+    echo ""
+    echo "Or if using custom key:"
+    echo -e "${CYAN}  ssh -i ~/.ssh/your-key ${APPMGR_USER}@YOUR_SERVER_IP${NC}"
+    echo ""
+
+    if confirm "Have you successfully logged in as ${APPMGR_USER}?" "n"; then
+      print_success "SSH access verified for ${APPMGR_USER}!"
+    else
+      print_warning "${APPMGR_USER} SSH not verified - you may need it for CI/CD later"
+      print_info "Fix: Ensure SSH key exists at /home/${APPMGR_USER}/.ssh/authorized_keys"
+    fi
 
     # Offer to lock passwords now that SSH works
     echo ""
@@ -294,18 +311,18 @@ display_next_steps() {
   echo ""
   echo -e "${CYAN}Next Steps:${NC}"
   echo ""
-  echo "1. ${BOLD}Always use ${SYSADMIN_USER} for system administration${NC}"
+  echo -e "1. ${BOLD}Always use ${SYSADMIN_USER} for system administration${NC}"
   echo "   ssh ${SYSADMIN_USER}@YOUR_SERVER"
   echo ""
-  echo "2. ${BOLD}Set up Cloudflare Tunnel${NC}"
+  echo -e "2. ${BOLD}Set up Cloudflare Tunnel${NC}"
   echo "   Follow: docs/01-cloudflare-setup.md"
   echo "   Or run: sudo ./scripts/install-cloudflared.sh"
   echo ""
-  echo "3. ${BOLD}Deploy your first app${NC}"
+  echo -e "3. ${BOLD}Deploy your first app${NC}"
   echo "   cp -r apps/_template apps/myapp"
   echo "   cd apps/myapp && docker compose up -d"
   echo ""
-  echo "4. ${BOLD}Set up GitOps CI/CD${NC}"
+  echo -e "4. ${BOLD}Set up GitOps CI/CD${NC}"
   echo "   See: .github/workflows/deploy.yml"
   echo ""
   echo -e "${BLUE}Documentation:${NC}"
