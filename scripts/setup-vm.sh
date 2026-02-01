@@ -371,8 +371,8 @@ else
 
       echo ""
       echo "Paste the SSH public key for $SYSADMIN_USER:"
-      echo "(Press Enter, then Ctrl+D when done)"
-      cat > "/home/$SYSADMIN_USER/.ssh/authorized_keys"
+      read -r SYSADMIN_KEY_INPUT
+      echo "$SYSADMIN_KEY_INPUT" > "/home/$SYSADMIN_USER/.ssh/authorized_keys"
 
       chmod 600 "/home/$SYSADMIN_USER/.ssh/authorized_keys"
       chown -R "$SYSADMIN_USER:$SYSADMIN_USER" "/home/$SYSADMIN_USER/.ssh"
@@ -384,8 +384,15 @@ else
 
       echo ""
       echo "Paste the SSH public key for $APPMGR_USER:"
-      echo "(Press Enter, then Ctrl+D when done. Or paste the same key.)"
-      cat > "/home/$APPMGR_USER/.ssh/authorized_keys"
+      echo "(Or press Enter to use the same key as $SYSADMIN_USER)"
+      read -r APPMGR_KEY_INPUT
+      if [ -z "$APPMGR_KEY_INPUT" ]; then
+        echo "$SYSADMIN_KEY_INPUT" > "/home/$APPMGR_USER/.ssh/authorized_keys"
+        print_success "SSH key added for $APPMGR_USER (same as sysadmin)"
+      else
+        echo "$APPMGR_KEY_INPUT" > "/home/$APPMGR_USER/.ssh/authorized_keys"
+        print_success "SSH key added for $APPMGR_USER"
+      fi
 
       chmod 600 "/home/$APPMGR_USER/.ssh/authorized_keys"
       chown -R "$APPMGR_USER:$APPMGR_USER" "/home/$APPMGR_USER/.ssh"
