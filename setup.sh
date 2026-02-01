@@ -29,6 +29,7 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="/opt/vm-config"
 CONFIG_FILE="${CONFIG_DIR}/setup.conf"
+STATE_FILE="${CONFIG_DIR}/setup.state"
 
 # Detect original user (who invoked sudo)
 if [ -n "${SUDO_USER:-}" ]; then
@@ -98,6 +99,64 @@ confirm() {
   response=${response:-$default}
 
   [[ "$response" =~ ^[Yy]$ ]]
+}
+
+# =================================================================
+# Step Tracking Functions (for resumable setup)
+# =================================================================
+
+# Initialize state tracking
+init_state() {
+  mkdir -p "$CONFIG_DIR"
+  if [ ! -f "$STATE_FILE" ]; then
+    cat > "$STATE_FILE" << EOF
+# Setup State - Generated $(date)
+# This file tracks completed steps for resumable setup
+EOF
+    chmod 600 "$STATE_FILE"
+  fi
+}
+
+# Check if a step is completed
+is_step_completed() {
+  local step_name="$1"
+  if [ -f "$STATE_FILE" ]; then
+    grep -q "^${step_name}=completed" "$STATE_FILE" 2>/dev/null
+    return $?
+  fi
+  return 1
+}
+
+# Mark a step as completed
+mark_step_completed() {
+  local step_name="$1"
+  init_state
+  # Remove any existing entry for this step
+  sed -i "/^${step_name}=/d" "$STATE_FILE" 2>/dev/null || true
+  # Add completed status
+  echo "${step_name}=completed" >> "$STATE_FILE"
+  print_success "Step marked complete: $step_name"
+}
+
+# Get completed steps count
+get_completed_steps() {
+  if [ -f "$STATE_FILE" ]; then
+    grep -c "=completed" "$STATE_FILE" 2>/dev/null || echo "0"
+  else
+    echo "0"
+  fi
+}
+
+# Load saved configuration
+load_saved_config() {
+  if [ -f "$CONFIG_FILE" ]; then
+    # Source the config file to load variables
+    set +u  # Temporarily allow undefined variables
+    source "$CONFIG_FILE"
+    set -u
+    return 0
+  fi
+  return 1
 }
 
 # =================================================================
@@ -205,17 +264,46 @@ fix_repo_ownership() {
 # =================================================================
 
 collect_config() {
+  # Check if we're resuming
+  local resuming=false
+  if load_saved_config; then
+    resuming=true
+    local completed=$(get_completed_steps)
+    print_header "Resuming Setup"
+    echo ""
+    print_info "Found existing configuration from $(date -d "${SETUP_DATE:-unknown}" '+%Y-%m-%d %H:%M' 2>/dev/null || echo 'previous run')"
+    print_info "Completed steps: $completed/5"
+    echo ""
+    print_info "Current configuration:"
+    echo "  Domain:     ${DOMAIN:-not set}"
+    echo "  Timezone:   ${TIMEZONE:-not set}"
+    echo "  Cloudflared: ${SETUP_CLOUDFLARED:-not set}"
+    echo ""
+    if confirm "Use this configuration and continue?" "y"; then
+      print_success "Resuming with saved configuration"
+      return 0
+    else
+      print_warning "Starting fresh configuration..."
+      resuming=false
+    fi
+  fi
+
   print_header "Configuration"
 
   # Domain
   echo ""
   echo "Enter your domain name (e.g., example.com)"
   echo "This will be used for app subdomains like app.example.com"
-  read -rp "Domain: " DOMAIN
-  while [ -z "$DOMAIN" ]; do
-    print_warning "Domain is required"
+  if [ "$resuming" = true ] && [ -n "${DOMAIN:-}" ]; then
+    read -rp "Domain [$DOMAIN]: " domain_input
+    DOMAIN=${domain_input:-$DOMAIN}
+  else
     read -rp "Domain: " DOMAIN
-  done
+    while [ -z "$DOMAIN" ]; do
+      print_warning "Domain is required"
+      read -rp "Domain: " DOMAIN
+    done
+  fi
 
   # SSH Public Key
   echo ""
@@ -316,6 +404,9 @@ EOF
 run_setup() {
   print_header "Running Setup"
 
+  # Initialize state tracking
+  init_state
+
   # Export variables for scripts
   export DOMAIN
   export TIMEZONE
@@ -323,76 +414,105 @@ run_setup() {
   export APPMGR_SSH_KEY
 
   # Step 1: VM Setup (hardening, users, Docker)
-  print_step "Step 1/5: VM Hardening & Docker Setup"
-  if [ -x "${SCRIPT_DIR}/scripts/setup-vm.sh" ]; then
-    bash "${SCRIPT_DIR}/scripts/setup-vm.sh"
-    print_success "VM setup complete"
+  if is_step_completed "vm_setup"; then
+    print_success "Step 1/5: VM Hardening & Docker Setup (already completed)"
   else
-    print_error "setup-vm.sh not found or not executable"
-    exit 1
+    print_step "Step 1/5: VM Hardening & Docker Setup"
+    if [ -x "${SCRIPT_DIR}/scripts/setup-vm.sh" ]; then
+      bash "${SCRIPT_DIR}/scripts/setup-vm.sh"
+      mark_step_completed "vm_setup"
+    else
+      print_error "setup-vm.sh not found or not executable"
+      exit 1
+    fi
   fi
 
   # Step 2: Configure Domain
-  print_step "Step 2/5: Configuring Domain"
-  if [ -x "${SCRIPT_DIR}/scripts/configure-domain.sh" ]; then
-    bash "${SCRIPT_DIR}/scripts/configure-domain.sh" "$DOMAIN"
-    print_success "Domain configured: $DOMAIN"
+  if is_step_completed "domain_config"; then
+    print_success "Step 2/5: Domain Configuration (already completed)"
   else
-    # Fallback: manual sed replacement
-    if [ -f "${SCRIPT_DIR}/infra/reverse-proxy/Caddyfile" ]; then
-      if grep -q "yourdomain.com" "${SCRIPT_DIR}/infra/reverse-proxy/Caddyfile"; then
-        sed -i "s/yourdomain.com/${DOMAIN}/g" "${SCRIPT_DIR}/infra/reverse-proxy/Caddyfile"
-        print_success "Updated Caddyfile with domain: $DOMAIN"
-      else
-        print_warning "Caddyfile doesn't contain 'yourdomain.com' placeholder - may already be configured"
-      fi
+    print_step "Step 2/5: Configuring Domain"
+    if [ -x "${SCRIPT_DIR}/scripts/configure-domain.sh" ]; then
+      bash "${SCRIPT_DIR}/scripts/configure-domain.sh" "$DOMAIN"
+      mark_step_completed "domain_config"
     else
-      print_warning "Caddyfile not found at ${SCRIPT_DIR}/infra/reverse-proxy/Caddyfile"
+      # Fallback: manual sed replacement
+      if [ -f "${SCRIPT_DIR}/infra/reverse-proxy/Caddyfile" ]; then
+        if grep -q "yourdomain.com" "${SCRIPT_DIR}/infra/reverse-proxy/Caddyfile"; then
+          sed -i "s/yourdomain.com/${DOMAIN}/g" "${SCRIPT_DIR}/infra/reverse-proxy/Caddyfile"
+          print_success "Updated Caddyfile with domain: $DOMAIN"
+        else
+          print_warning "Caddyfile doesn't contain 'yourdomain.com' placeholder - may already be configured"
+        fi
+      else
+        print_warning "Caddyfile not found at ${SCRIPT_DIR}/infra/reverse-proxy/Caddyfile"
+      fi
+      mark_step_completed "domain_config"
     fi
   fi
 
   # Step 3: Docker Networks
-  print_step "Step 3/5: Creating Docker Networks"
-  if [ -x "${SCRIPT_DIR}/scripts/create-networks.sh" ]; then
-    bash "${SCRIPT_DIR}/scripts/create-networks.sh"
-    print_success "Networks created"
+  if is_step_completed "docker_networks"; then
+    print_success "Step 3/5: Docker Networks (already completed)"
   else
-    print_warning "create-networks.sh not found, skipping"
+    print_step "Step 3/5: Creating Docker Networks"
+    if [ -x "${SCRIPT_DIR}/scripts/create-networks.sh" ]; then
+      bash "${SCRIPT_DIR}/scripts/create-networks.sh"
+      mark_step_completed "docker_networks"
+    else
+      print_warning "create-networks.sh not found, skipping"
+      mark_step_completed "docker_networks"
+    fi
   fi
 
   # Step 4: Cloudflared (optional)
-  if [ "$SETUP_CLOUDFLARED" = "yes" ]; then
-    print_step "Step 4/5: Cloudflare Tunnel Setup"
-    if [ -x "${SCRIPT_DIR}/scripts/install-cloudflared.sh" ]; then
-      echo ""
-      echo "The cloudflared setup will guide you through authentication."
-      echo "You'll need to log in to Cloudflare in your browser."
-      echo ""
-      if confirm "Ready to set up cloudflared?"; then
-        bash "${SCRIPT_DIR}/scripts/install-cloudflared.sh"
-        print_success "Cloudflared setup complete"
+  if is_step_completed "cloudflared_setup"; then
+    print_success "Step 4/5: Cloudflare Tunnel (already completed)"
+  else
+    if [ "$SETUP_CLOUDFLARED" = "yes" ]; then
+      print_step "Step 4/5: Cloudflare Tunnel Setup"
+      if [ -x "${SCRIPT_DIR}/scripts/install-cloudflared.sh" ]; then
+        echo ""
+        echo "The cloudflared setup will guide you through authentication."
+        echo "You'll need to log in to Cloudflare in your browser."
+        echo ""
+        if confirm "Ready to set up cloudflared?"; then
+          bash "${SCRIPT_DIR}/scripts/install-cloudflared.sh"
+          mark_step_completed "cloudflared_setup"
+        else
+          print_warning "Cloudflared setup skipped (can run later with ./scripts/install-cloudflared.sh)"
+          mark_step_completed "cloudflared_setup"
+        fi
       else
-        print_warning "Cloudflared setup skipped"
+        print_warning "install-cloudflared.sh not found, skipping"
+        mark_step_completed "cloudflared_setup"
       fi
     else
-      print_warning "install-cloudflared.sh not found, skipping"
+      print_step "Step 4/5: Cloudflared Setup (skipped)"
+      mark_step_completed "cloudflared_setup"
     fi
-  else
-    print_step "Step 4/5: Cloudflared Setup (skipped)"
   fi
 
   # Step 5: Reverse Proxy
-  print_step "Step 5/5: Starting Reverse Proxy"
-
-  # Start Caddy if compose file exists
-  if [ -f "${SCRIPT_DIR}/infra/reverse-proxy/compose.yml" ]; then
-    cd "${SCRIPT_DIR}/infra/reverse-proxy"
-    docker compose up -d
-    print_success "Caddy reverse proxy started"
-    cd "$SCRIPT_DIR"
+  if is_step_completed "reverse_proxy"; then
+    print_success "Step 5/5: Reverse Proxy (already completed)"
   else
-    print_warning "Reverse proxy compose.yml not found"
+    print_step "Step 5/5: Starting Reverse Proxy"
+
+    # Start Caddy if compose file exists
+    if [ -f "${SCRIPT_DIR}/infra/reverse-proxy/compose.yml" ]; then
+      cd "${SCRIPT_DIR}/infra/reverse-proxy"
+      docker compose up -d
+      mark_step_completed "reverse_proxy"
+      cd "$SCRIPT_DIR"
+    else
+      print_warning "Reverse proxy compose.yml not found"
+      mark_step_completed "reverse_proxy"
+    fi
   fi
+
+  # Mark overall setup as complete
+  touch "/opt/hosting-blueprint/.vm-setup-complete"
 }
 
 # =================================================================
@@ -482,7 +602,32 @@ print_next_steps() {
 # =================================================================
 
 main() {
+  # Check if setup is already complete
+  if [ -f "/opt/hosting-blueprint/.vm-setup-complete" ]; then
+    print_header "Setup Already Complete"
+    echo ""
+    print_warning "This VM has already been set up."
+    print_info "Configuration: $CONFIG_FILE"
+    print_info "State: $STATE_FILE"
+    echo ""
+    print_info "If you want to:"
+    echo "  • Re-run specific steps: Check scripts/ directory"
+    echo "  • Verify setup: ./scripts/verify-setup.sh"
+    echo "  • Start fresh: Delete $CONFIG_DIR and $STATE_FILE"
+    echo ""
+    exit 0
+  fi
+
   print_header "Hardened Multi-Environment VPS Setup"
+
+  # Check if resuming
+  local resuming_msg=""
+  if [ -f "$STATE_FILE" ]; then
+    local completed=$(get_completed_steps)
+    if [ "$completed" -gt 0 ]; then
+      resuming_msg=" (Resuming - $completed/5 steps completed)"
+    fi
+  fi
 
   echo "This script will set up a production-ready, hardened Ubuntu server with:"
   echo "  • Security hardening (SSH, firewall, fail2ban, kernel)"
@@ -491,6 +636,11 @@ main() {
   echo "  • Cloudflare Tunnel for zero exposed ports"
   echo "  • Automated maintenance and updates"
   echo ""
+
+  if [ -n "$resuming_msg" ]; then
+    print_info "$resuming_msg"
+    echo ""
+  fi
 
   if ! confirm "Continue with setup?" "y"; then
     echo "Setup cancelled"
