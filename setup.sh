@@ -409,40 +409,38 @@ print_next_steps() {
 
   echo -e "${CYAN}Next Steps:${NC}"
   echo ""
-  echo "1. ${BOLD}Test SSH Access${NC}"
-  echo "   ssh sysadmin@${DOMAIN} -i ~/.ssh/your-key"
+  echo -e "${YELLOW}⚠️  IMPORTANT: Run the verification script!${NC}"
   echo ""
-
-  echo "2. ${BOLD}Manage Default User (${ORIGINAL_USER})${NC}"
-  echo "   sudo ./scripts/post-setup-user-cleanup.sh"
-  echo "   Choose: Lock (recommended), Delete, or Keep Active"
+  echo "1. ${BOLD}Verify Setup & Test SSH${NC}"
+  echo "   ./scripts/verify-setup.sh"
+  echo "   ${CYAN}(This will guide you through SSH testing and user management)${NC}"
   echo ""
 
   if [ "$SETUP_CLOUDFLARED" = "yes" ]; then
-    echo "3. ${BOLD}Configure Cloudflare Tunnel${NC}"
+    echo "2. ${BOLD}Configure Cloudflare Tunnel${NC}"
     echo "   - Add DNS CNAME records in Cloudflare dashboard"
     echo "   - Point subdomains to your tunnel"
     echo ""
   else
-    echo "3. ${BOLD}Set Up Cloudflare Tunnel${NC}"
+    echo "2. ${BOLD}Set Up Cloudflare Tunnel${NC}"
     echo "   ./scripts/install-cloudflared.sh"
     echo ""
   fi
 
-  echo "4. ${BOLD}Create Your First App${NC}"
+  echo "3. ${BOLD}Create Your First App${NC}"
   echo "   cp -r apps/_template apps/myapp"
   echo "   cd apps/myapp"
   echo "   # Edit compose.yml and .env"
   echo "   docker compose up -d"
   echo ""
 
-  echo "5. ${BOLD}Create Secrets${NC}"
+  echo "4. ${BOLD}Create Secrets${NC}"
   echo "   ./scripts/secrets/create-secret.sh dev db_password"
   echo "   ./scripts/secrets/create-secret.sh staging db_password"
   echo "   ./scripts/secrets/create-secret.sh production db_password"
   echo ""
 
-  echo "6. ${BOLD}Set Up GitHub Actions${NC}"
+  echo "5. ${BOLD}Set Up GitHub Actions${NC}"
   echo "   - Fork this repo to your GitHub account"
   echo "   - Add secrets in Settings > Secrets and variables > Actions:"
   echo "     - SSH_PRIVATE_KEY"
@@ -452,7 +450,7 @@ print_next_steps() {
   echo "     - CF_SERVICE_TOKEN_SECRET"
   echo ""
 
-  echo "7. ${BOLD}Protect Admin Panels (Zero Trust)${NC}"
+  echo "6. ${BOLD}Protect Admin Panels (Zero Trust)${NC}"
   echo "   - Go to Cloudflare Zero Trust dashboard"
   echo "   - Access > Applications > Add self-hosted app"
   echo "   - Create policies for: monitoring.${DOMAIN}, admin panels"

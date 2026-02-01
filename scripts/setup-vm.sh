@@ -55,6 +55,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 CONFIG_DIR="${REPO_DIR}/config"
 
+# Checkpoint system for resumable setup
+CHECKPOINT_FILE="/var/run/vm-setup-checkpoints"
+
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -127,6 +130,51 @@ print_warning() {
 
 print_error() {
   echo -e "${RED}✗ $1${NC}"
+}
+
+# =================================================================
+# Checkpoint System (for resumable setup)
+# =================================================================
+
+mark_checkpoint() {
+  local step="$1"
+  if [ "$DRY_RUN" != "true" ]; then
+    echo "$step" >> "$CHECKPOINT_FILE"
+  fi
+}
+
+is_checkpoint_done() {
+  local step="$1"
+  if [ "$DRY_RUN" = "true" ]; then
+    return 1  # In dry-run, never skip
+  fi
+  if [ -f "$CHECKPOINT_FILE" ] && grep -q "^${step}$" "$CHECKPOINT_FILE"; then
+    return 0  # Checkpoint exists, step was completed
+  fi
+  return 1  # Checkpoint doesn't exist, need to run this step
+}
+
+clear_checkpoints() {
+  rm -f "$CHECKPOINT_FILE"
+}
+
+# =================================================================
+# Service Status Helpers (with retry logic)
+# =================================================================
+
+wait_for_service() {
+  local service="$1"
+  local max_attempts="${2:-10}"
+  local attempt=1
+
+  while [ $attempt -le $max_attempts ]; do
+    if systemctl is-active --quiet "$service"; then
+      return 0
+    fi
+    sleep 1
+    ((attempt++))
+  done
+  return 1
 }
 
 check_root() {
@@ -211,19 +259,22 @@ fi
 # Step 1: System Update & Essential Packages
 # =================================================================
 
-print_header "Step 1/10: System Update & Essential Packages"
+if is_checkpoint_done "step1_packages"; then
+  print_header "Step 1/10: System Update & Essential Packages (SKIPPED - already done)"
+else
+  print_header "Step 1/10: System Update & Essential Packages"
 
-print_step "Updating package lists..."
-run_cmd apt update
+  print_step "Updating package lists..."
+  run_cmd apt update
 
-print_step "Upgrading system packages..."
-run_cmd apt upgrade -y
+  print_step "Upgrading system packages..."
+  run_cmd apt upgrade -y
 
-print_step "Installing essential packages..."
-run_cmd apt install -y \
-  curl \
-  wget \
-  git \
+  print_step "Installing essential packages..."
+  run_cmd apt install -y \
+    curl \
+    wget \
+    git \
   vim \
   nano \
   htop \
@@ -242,7 +293,9 @@ run_cmd apt install -y \
   jq \
   tree
 
-print_success "Essential packages installed"
+  print_success "Essential packages installed"
+  mark_checkpoint "step1_packages"
+fi
 
 # =================================================================
 # Step 2: Create Users
@@ -526,8 +579,15 @@ fi
 systemctl enable fail2ban
 systemctl restart fail2ban
 
-print_success "fail2ban configured and started"
-fail2ban-client status
+# Wait for fail2ban to fully start
+if wait_for_service fail2ban; then
+  print_success "fail2ban configured and started"
+  # Give it one more second for socket to be ready
+  sleep 1
+  fail2ban-client status 2>/dev/null || print_warning "fail2ban is starting (socket not ready yet, but service is running)"
+else
+  print_warning "fail2ban service taking longer to start, but will be ready shortly"
+fi
 
 # =================================================================
 # Step 8: auditd
