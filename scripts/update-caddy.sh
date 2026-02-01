@@ -3,7 +3,10 @@
 # Safe Caddy Configuration Update
 # Validates config before applying, with automatic rollback on failure
 #
-# Usage: ./scripts/update-caddy.sh
+# Usage:
+#   ./scripts/update-caddy.sh                              # Uses /opt/infrastructure
+#   ./scripts/update-caddy.sh /opt/infrastructure/infra/reverse-proxy
+#   ./scripts/update-caddy.sh /custom/path/to/caddy
 #
 # This script:
 # 1. Backs up current Caddyfile
@@ -20,7 +23,20 @@ RED='\033[0;31m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-CADDY_DIR="/opt/hosting-blueprint/infra/reverse-proxy"
+# Determine Caddy directory
+if [ -n "${1:-}" ]; then
+  CADDY_DIR="$1"
+elif [ -d "/opt/infrastructure/infra/reverse-proxy" ]; then
+  CADDY_DIR="/opt/infrastructure/infra/reverse-proxy"
+elif [ -d "/opt/hosting-blueprint/infra/reverse-proxy" ]; then
+  CADDY_DIR="/opt/hosting-blueprint/infra/reverse-proxy"
+  echo -e "${YELLOW}⚠ Using template directory. Consider using /opt/infrastructure instead.${NC}"
+else
+  echo -e "${RED}✗ Cannot find Caddy directory${NC}"
+  echo "Usage: $0 [CADDY_DIR]"
+  exit 1
+fi
+
 CADDYFILE="$CADDY_DIR/Caddyfile"
 BACKUP_DIR="$CADDY_DIR/backups"
 
@@ -28,6 +44,13 @@ print_step() { echo -e "${BLUE}➜${NC} $1"; }
 print_success() { echo -e "${GREEN}✓${NC} $1"; }
 print_warning() { echo -e "${YELLOW}⚠${NC} $1"; }
 print_error() { echo -e "${RED}✗${NC} $1"; }
+
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BLUE}  Safe Caddy Configuration Update${NC}"
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo
+echo -e "${BLUE}Directory:${NC} $CADDY_DIR"
+echo
 
 # Check if Caddyfile exists
 if [ ! -f "$CADDYFILE" ]; then
