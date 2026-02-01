@@ -61,9 +61,10 @@ curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg -o /usr/share/keyrings
 # Verify Cloudflare GPG key fingerprint (official fingerprint from pkg.cloudflare.com)
 # Userid: "CloudFlare Software Packaging <help@cloudflare.com>"
 # Note: Using case-insensitive grep and normalizing to uppercase for comparison
+# Updated: Key rotated on October 30, 2025
 echo "Verifying Cloudflare GPG key fingerprint..."
 CLOUDFLARE_GPG_FINGERPRINT=$(gpg --show-keys --with-fingerprint /usr/share/keyrings/cloudflare-main.gpg 2>/dev/null | grep -oiP '([a-f0-9]{4}\s*){10}' | tr -d ' ' | tr '[:lower:]' '[:upper:]' | head -1)
-EXPECTED_CF_FINGERPRINT="FBA8C0EE63617C5EED695C43254B391D8CACCBF8"
+EXPECTED_CF_FINGERPRINT="CC94B39C77AE7342A68B89628A682D308D4E5E73"
 if [ "$CLOUDFLARE_GPG_FINGERPRINT" != "$EXPECTED_CF_FINGERPRINT" ]; then
   echo -e "${RED}✗ Cloudflare GPG key fingerprint mismatch!${NC}"
   echo -e "${RED}  Expected: $EXPECTED_CF_FINGERPRINT${NC}"
