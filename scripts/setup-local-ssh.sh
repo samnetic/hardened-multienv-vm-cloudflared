@@ -104,7 +104,7 @@ IDENTITY_FILE="${3:-}"
 DOMAIN="${SSH_HOSTNAME#ssh.}"
 
 # Default alias: domain name, plus user suffix if not sysadmin
-# Example: "codeagen" for sysadmin, "codeagen-appmgr" for appmgr
+# Example: "myserver" for sysadmin, "myserver-appmgr" for appmgr
 BASE_ALIAS="${DOMAIN%%.*}"
 if [ "$SSH_USER" = "sysadmin" ]; then
   SSH_ALIAS="$BASE_ALIAS"

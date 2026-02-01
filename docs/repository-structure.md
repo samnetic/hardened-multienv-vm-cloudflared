@@ -67,7 +67,7 @@ Click "Use this template" → Create new repository named `infrastructure`
 
 ```bash
 # SSH to server
-ssh codeagen
+ssh myserver
 
 # Switch to appmgr user
 sudo su - appmgr

@@ -263,7 +263,7 @@ This repository contains all infrastructure configuration for your server.
 
 ```bash
 # SSH to server
-ssh codeagen
+ssh myserver
 
 # Switch to appmgr
 sudo su - appmgr
@@ -389,7 +389,7 @@ git commit -m "Add route for new API"
 git push
 
 # On server, pull changes
-ssh codeagen
+ssh myserver
 sudo su - appmgr
 cd /opt/infrastructure
 git pull

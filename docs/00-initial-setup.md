@@ -429,7 +429,7 @@ Host yourdomain-appmgr
 ```
 
 **Replace:**
-- `yourdomain` → your actual domain base (e.g., `codeagen`)
+- `yourdomain` → your actual domain base (e.g., `myproject`)
 - `ssh.yourdomain.com` → your actual SSH hostname
 - `~/.ssh/id_ed25519` → your actual key path
 

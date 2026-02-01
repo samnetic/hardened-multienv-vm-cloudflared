@@ -26,7 +26,7 @@
 
 ```bash
 # SSH to server
-ssh codeagen
+ssh myserver
 sudo su - appmgr
 
 # Clone your infrastructure repo
@@ -164,7 +164,7 @@ git commit -m "Add route for new API"
 git push
 
 # On server
-ssh codeagen
+ssh myserver
 sudo su - appmgr
 cd /opt/infrastructure
 git pull
