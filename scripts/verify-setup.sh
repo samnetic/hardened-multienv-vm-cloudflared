@@ -161,6 +161,8 @@ verify_ssh_keys() {
 verify_security_hardening() {
   print_header "Step 3: Verify Security Hardening"
 
+  local all_good=true
+
   # Check kernel hardening
   local ptrace=$(sysctl -n kernel.yama.ptrace_scope 2>/dev/null || echo "0")
   if [ "$ptrace" = "2" ]; then
@@ -169,11 +171,22 @@ verify_security_hardening() {
     print_warning "Kernel hardening incomplete: ptrace_scope = $ptrace (expected: 2)"
   fi
 
+  # Check ASLR
+  local aslr=$(sysctl -n kernel.randomize_va_space 2>/dev/null || echo "0")
+  if [ "$aslr" = "2" ]; then
+    print_success "ASLR enabled: randomize_va_space = 2"
+  else
+    print_warning "ASLR not fully enabled: randomize_va_space = $aslr (expected: 2)"
+  fi
+
   # Check fail2ban
   if systemctl is-active --quiet fail2ban; then
     print_success "fail2ban is running"
+    local ban_count=$(sudo fail2ban-client status sshd 2>/dev/null | grep "Currently banned" | awk '{print $4}' || echo "0")
+    echo "   Currently banned IPs: $ban_count"
   else
     print_warning "fail2ban is not running"
+    all_good=false
   fi
 
   # Check auditd
@@ -187,23 +200,164 @@ verify_security_hardening() {
   if command -v ufw &> /dev/null; then
     if sudo ufw status | grep -q "Status: active"; then
       print_success "UFW firewall is active"
+      # Check if no ports are open (zero trust)
+      local open_ports=$(sudo ufw status numbered | grep -c "ALLOW" || echo "0")
+      if [ "$open_ports" -eq 0 ]; then
+        print_success "No ports exposed (zero trust achieved!)"
+      else
+        print_warning "$open_ports port rule(s) found - review if needed after tunnel setup"
+      fi
     else
       print_warning "UFW firewall is not active"
+      all_good=false
     fi
   fi
 
   # Check Docker
   if command -v docker &> /dev/null; then
-    print_success "Docker is installed ($(docker --version | awk '{print $3}' | tr -d ','))"
+    local docker_version=$(docker --version | awk '{print $3}' | tr -d ',')
+    print_success "Docker is installed ($docker_version)"
+
+    # Check docker compose
+    if docker compose version &>/dev/null; then
+      local compose_version=$(docker compose version | awk '{print $4}')
+      print_success "Docker Compose is installed ($compose_version)"
+    else
+      print_warning "Docker Compose not found"
+    fi
   else
-    print_warning "Docker is not installed"
+    print_error "Docker is not installed"
+    all_good=false
+  fi
+
+  # Check password authentication disabled
+  if sudo sshd -T 2>/dev/null | grep -q "^passwordauthentication no"; then
+    print_success "SSH password authentication disabled"
+  else
+    print_warning "SSH password authentication may be enabled"
   fi
 
   echo ""
+  return 0
+}
+
+verify_docker_networks() {
+  print_header "Step 4: Verify Docker Networks"
+
+  local expected_networks=("dev-network" "staging-network" "production-network")
+  local all_good=true
+
+  for network in "${expected_networks[@]}"; do
+    if docker network inspect "$network" &>/dev/null; then
+      print_success "Network '$network' exists"
+    else
+      print_warning "Network '$network' not found"
+      all_good=false
+    fi
+  done
+
+  if [ "$all_good" = false ]; then
+    echo ""
+    print_info "Create networks with: ./scripts/create-networks.sh"
+  fi
+
+  echo ""
+  return 0
+}
+
+verify_services() {
+  print_header "Step 5: Verify Services"
+
+  # Check Caddy reverse proxy
+  if docker ps | grep -q caddy; then
+    print_success "Caddy reverse proxy is running"
+    local caddy_status=$(docker ps --filter "name=caddy" --format "{{.Status}}")
+    echo "   Status: $caddy_status"
+  else
+    print_warning "Caddy reverse proxy not running"
+    print_info "Start with: cd infra/reverse-proxy && docker compose up -d"
+  fi
+
+  # Check Cloudflared tunnel
+  if systemctl is-active --quiet cloudflared 2>/dev/null || docker ps | grep -q cloudflared; then
+    print_success "Cloudflare Tunnel is running"
+  else
+    print_info "Cloudflare Tunnel not detected (optional)"
+    print_info "Set up with: ./scripts/install-cloudflared.sh"
+  fi
+
+  # Check timezone
+  local current_tz=$(timedatectl show -p Timezone --value 2>/dev/null || echo "unknown")
+  if [ "$current_tz" != "unknown" ]; then
+    print_success "Timezone configured: $current_tz"
+  else
+    print_warning "Timezone not configured"
+  fi
+
+  echo ""
+  return 0
+}
+
+verify_system_resources() {
+  print_header "Step 6: Verify System Resources"
+
+  # Check disk space
+  local disk_usage=$(df -h / | awk 'NR==2 {print $5}' | tr -d '%')
+  local disk_avail=$(df -h / | awk 'NR==2 {print $4}')
+
+  if [ "$disk_usage" -lt 80 ]; then
+    print_success "Disk usage: ${disk_usage}% (${disk_avail} available)"
+  else
+    print_warning "Disk usage: ${disk_usage}% (${disk_avail} available)"
+    print_info "Consider cleanup: docker system prune -a"
+  fi
+
+  # Check memory
+  local mem_total=$(free -h | awk '/^Mem:/ {print $2}')
+  local mem_used=$(free -h | awk '/^Mem:/ {print $3}')
+  local mem_percent=$(free | awk '/^Mem:/ {printf "%.0f", $3/$2 * 100}')
+
+  print_info "Memory: ${mem_used}/${mem_total} used (${mem_percent}%)"
+
+  # Check load average
+  local load_avg=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | tr -d ',')
+  print_info "Load average (1min): $load_avg"
+
+  echo ""
+  return 0
+}
+
+verify_configuration() {
+  print_header "Step 7: Verify Configuration Files"
+
+  # Check main config
+  if [ -f "/opt/vm-config/setup.conf" ]; then
+    print_success "Setup configuration found"
+    local domain=$(grep "^DOMAIN=" /opt/vm-config/setup.conf | cut -d'=' -f2 | tr -d '"' || echo "")
+    if [ -n "$domain" ]; then
+      echo "   Domain: $domain"
+    fi
+  else
+    print_warning "Setup configuration not found"
+  fi
+
+  # Check if repository exists
+  if [ -d "/opt/hosting-blueprint" ]; then
+    print_success "Repository installed at /opt/hosting-blueprint"
+    if [ -d "/opt/hosting-blueprint/.git" ]; then
+      local branch=$(cd /opt/hosting-blueprint && git branch --show-current 2>/dev/null || echo "unknown")
+      echo "   Git branch: $branch"
+    fi
+  else
+    print_warning "Repository not found at expected location"
+  fi
+
+  echo ""
+  return 0
 }
 
 test_ssh_access() {
-  print_header "Step 4: Test SSH Access (Critical!)"
+  print_header "Step 8: Test SSH Access (Critical!)"
 
   echo -e "${YELLOW}Before proceeding, you MUST verify SSH access as the new user.${NC}"
   echo ""
@@ -267,7 +421,7 @@ test_ssh_access() {
 }
 
 handle_default_user() {
-  print_header "Step 5: Manage Default User ($CURRENT_USER)"
+  print_header "Step 9: Manage Default User ($CURRENT_USER)"
 
   echo "Now that ${SYSADMIN_USER} works, what should we do with the default user ($CURRENT_USER)?"
   echo ""
@@ -348,6 +502,10 @@ main() {
   verify_users_created || exit 1
   verify_ssh_keys || exit 1
   verify_security_hardening
+  verify_docker_networks
+  verify_services
+  verify_system_resources
+  verify_configuration
   test_ssh_access || exit 1
 
   # Handle default user
