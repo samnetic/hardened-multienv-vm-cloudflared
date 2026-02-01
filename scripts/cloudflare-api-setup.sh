@@ -76,7 +76,7 @@ show_token_creation_guide() {
   echo ""
   echo -e "4. ${CYAN}Add these permissions:${NC}"
   echo ""
-  echo -e "   ${GREEN}✓${NC} Zone | SSL and TLS | ${BOLD}Edit${NC}"
+  echo -e "   ${GREEN}✓${NC} Zone | SSL and Certificates | ${BOLD}Edit${NC}"
   echo -e "   ${GREEN}✓${NC} Zone | Zone Settings | ${BOLD}Edit${NC}"
   echo -e "   ${GREEN}✓${NC} Zone | Zone | ${BOLD}Read${NC}"
   echo ""
