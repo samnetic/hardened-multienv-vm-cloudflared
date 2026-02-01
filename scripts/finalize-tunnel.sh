@@ -465,17 +465,36 @@ detect_vm_ip() {
   # Try multiple methods to detect public IP
   local ip=""
 
-  # Method 1: Check default route interface
-  ip=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+')
+  # Method 1: Query Cloudflare (most reliable for public IP)
+  ip=$(curl -s --max-time 5 https://1.1.1.1/cdn-cgi/trace 2>/dev/null | grep -oP 'ip=\K[0-9.]+')
 
-  # Method 2: Query external service
+  # Method 2: Query ipify.org
   if [ -z "$ip" ]; then
-    ip=$(curl -s https://api.ipify.org 2>/dev/null)
+    ip=$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null)
   fi
 
-  # Method 3: Query Cloudflare
+  # Method 3: Query ifconfig.me
   if [ -z "$ip" ]; then
-    ip=$(curl -s https://1.1.1.1/cdn-cgi/trace 2>/dev/null | grep -oP 'ip=\K[^$]+')
+    ip=$(curl -s --max-time 5 https://ifconfig.me 2>/dev/null)
+  fi
+
+  # Method 4: Check default route (fallback, may return private IP on NAT)
+  if [ -z "$ip" ]; then
+    ip=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+')
+  fi
+
+  # Validate it's a public IP (not private range)
+  if [ -n "$ip" ]; then
+    # Check if it's a private IP range (10.x, 172.16-31.x, 192.168.x)
+    if [[ "$ip" =~ ^10\. ]] || [[ "$ip" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]] || [[ "$ip" =~ ^192\.168\. ]]; then
+      # It's private, warn user
+      echo "" >&2
+      print_warning "Detected private IP: $ip" >&2
+      print_warning "This VM is behind NAT. External services couldn't determine public IP." >&2
+      echo "" >&2
+      read -rp "Enter your VM's public IP address: " public_ip
+      ip="$public_ip"
+    fi
   fi
 
   echo "$ip"
