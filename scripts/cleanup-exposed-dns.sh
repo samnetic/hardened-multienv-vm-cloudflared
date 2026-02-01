@@ -228,14 +228,16 @@ main() {
   print_step "Scanning DNS records for $DOMAIN..."
   EXPOSED_RECORDS=$(list_a_records_for_ip "$CF_ZONE_ID" "$CF_API_TOKEN" "$VM_IP")
 
+  REMOVED=0
+  FAILED=0
+
   if [ -z "$EXPOSED_RECORDS" ]; then
     print_success "No A records found pointing to $VM_IP"
     echo ""
-    print_success "Your VM IP is not exposed via DNS!"
+    print_info "Your VM IP is not exposed via DNS - good!"
     echo ""
-    print_info "All traffic should be going through Cloudflare Tunnel"
-    exit 0
-  fi
+    # Don't exit - continue to check CNAME records
+  else
 
   # Show exposed records with numbers
   echo ""
@@ -310,13 +312,11 @@ main() {
       ;;
   esac
 
-  # Delete selected A records
-  echo ""
-  print_step "Removing selected A records..."
-  REMOVED=0
-  FAILED=0
+    # Delete selected A records
+    echo ""
+    print_step "Removing selected A records..."
 
-  while IFS='|' read -r record_id record_name record_content; do
+    while IFS='|' read -r record_id record_name record_content; do
     # Skip empty lines
     if [ -z "$record_id" ]; then
       continue
@@ -338,28 +338,28 @@ main() {
       ((FAILED++))
     fi
 
-    # Small delay between API calls
-    sleep 0.5
-  done <<< "$RECORDS_TO_REMOVE"
+      # Small delay between API calls
+      sleep 0.5
+    done <<< "$RECORDS_TO_REMOVE"
+
+    echo ""
+    print_header "A Record Cleanup Complete"
+
+    if [ $REMOVED -gt 0 ]; then
+      echo -e "${GREEN}✓ Removed $REMOVED A record(s)${NC}"
+    fi
+
+    if [ $FAILED -gt 0 ]; then
+      echo -e "${RED}✗ Failed to remove $FAILED A record(s)${NC}"
+    fi
+  fi  # End of EXPOSED_RECORDS check
+
+  # =================================================================
+  # Step 2: Add Missing CNAME Records (Always Run)
+  # =================================================================
 
   echo ""
-  print_header "A Record Cleanup Complete"
-
-  if [ $REMOVED -gt 0 ]; then
-    echo -e "${GREEN}✓ Removed $REMOVED A record(s)${NC}"
-  fi
-
-  if [ $FAILED -gt 0 ]; then
-    echo -e "${RED}✗ Failed to remove $FAILED A record(s)${NC}"
-  fi
-
-  # =================================================================
-  # Step 2: Add Missing CNAME Records
-  # =================================================================
-
-  if [ $REMOVED -gt 0 ]; then
-    echo ""
-    print_header "Step 2: Setup Tunnel Routing (CNAME Records)"
+  print_header "Step 2: Setup Tunnel Routing (CNAME Records)"
 
     # Get tunnel ID from config
     TUNNEL_ID=""
@@ -464,7 +464,6 @@ main() {
     else
       print_success "All required CNAME records exist!"
     fi
-  fi
 
   # =================================================================
   # Final Summary
@@ -473,21 +472,25 @@ main() {
   echo ""
   print_header "Setup Complete"
 
-  if [ $REMOVED -gt 0 ] && [ $FAILED -eq 0 ]; then
-    echo -e "${GREEN}✓ Your VM IP is no longer exposed!${NC}"
-    echo -e "${GREEN}✓ All traffic now flows through Cloudflare Tunnel${NC}"
-    echo ""
-
-    print_info "Your DNS configuration:"
-    echo "  • A records pointing to VM IP: ${GREEN}REMOVED${NC}"
-    echo "  • CNAME records pointing to tunnel: ${GREEN}ACTIVE${NC}"
-    echo ""
-
-    print_info "Test your setup:"
-    echo "  curl https://$DOMAIN"
-    echo "  curl https://www.$DOMAIN"
-    echo "  ssh ${DOMAIN%%.*}  # SSH via tunnel"
+  # Show what was done
+  if [ $REMOVED -gt 0 ]; then
+    echo -e "${GREEN}✓ Removed $REMOVED A record(s) exposing VM IP${NC}"
   fi
+
+  echo -e "${GREEN}✓ DNS is configured for Cloudflare Tunnel${NC}"
+  echo ""
+
+  print_info "Your DNS configuration:"
+  echo "  • A records pointing to VM IP: ${GREEN}NONE${NC}"
+  echo "  • CNAME records pointing to tunnel: ${GREEN}ACTIVE${NC}"
+  echo "  • All traffic routed through: ${GREEN}Cloudflare${NC}"
+  echo ""
+
+  print_info "Test your setup:"
+  echo "  curl https://$DOMAIN"
+  echo "  curl https://www.$DOMAIN"
+  echo "  curl https://staging-app.$DOMAIN"
+  echo "  ssh ${DOMAIN%%.*}  # SSH via tunnel"
 
   echo ""
 }
