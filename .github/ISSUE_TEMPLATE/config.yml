@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 GitHub Discussions
+    url: https://github.com/samnetic/hardened-multienv-vm-cloudflared/discussions
+    about: Ask questions, share ideas, and discuss with the community
+  - name: 📖 Documentation
+    url: https://github.com/samnetic/hardened-multienv-vm-cloudflared/blob/master/docs/00-initial-setup.md
+    about: Read the full setup guide and documentation
+  - name: 🔒 Security Vulnerabilities
+    url: mailto:security@samnetic.com
+    about: Report security vulnerabilities privately
