@@ -363,21 +363,24 @@ else
   if id "$SYSADMIN_USER" &>/dev/null; then
     print_warning "User '$SYSADMIN_USER' already exists"
   else
-    # Create user with temporary password for immediate sudo access
-    adduser --gecos "System Administrator" "$SYSADMIN_USER"
+    # Create user without password (SSH key only)
+    adduser --disabled-password --gecos "System Administrator" "$SYSADMIN_USER"
     usermod -aG sudo "$SYSADMIN_USER"
-    print_success "Created user '$SYSADMIN_USER' with sudo access"
-    print_info "Password will be locked after SSH key verification"
+
+    # Configure passwordless sudo
+    echo "${SYSADMIN_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${SYSADMIN_USER}"
+    chmod 440 "/etc/sudoers.d/${SYSADMIN_USER}"
+
+    print_success "Created user '$SYSADMIN_USER' with passwordless sudo"
   fi
 
   # Create appmgr user (docker access only, no sudo)
   if id "$APPMGR_USER" &>/dev/null; then
     print_warning "User '$APPMGR_USER' already exists"
   else
-    # Create with password for consistency
-    adduser --gecos "Application Manager" "$APPMGR_USER"
-    print_success "Created user '$APPMGR_USER' (no sudo)"
-    print_info "Password will be locked after SSH key verification"
+    # Create without password (SSH key only)
+    adduser --disabled-password --gecos "Application Manager" "$APPMGR_USER"
+    print_success "Created user '$APPMGR_USER' (no sudo, docker only)"
   fi
 fi
 
@@ -833,6 +836,85 @@ fi
 chmod +x /opt/scripts/check-disk-usage.sh
 
 # =================================================================
+# Step 11: Verify SSH Access & Manage Original User
+# =================================================================
+
+if [ "$DRY_RUN" != "true" ]; then
+  print_header "Step 11/11: Verify SSH Access (CRITICAL!)"
+
+  # Detect original user
+  ORIGINAL_INVOKING_USER="${SUDO_USER:-ubuntu}"
+
+  echo -e "${YELLOW}⚠️  CRITICAL: You MUST verify SSH access before continuing!${NC}"
+  echo ""
+  echo "From your LOCAL machine, open a NEW terminal and test:"
+  echo ""
+  echo -e "${CYAN}  ssh ${SYSADMIN_USER}@YOUR_SERVER_IP${NC}"
+  echo ""
+  echo -e "${RED}⚠️  DO NOT close this session until SSH works!${NC}"
+  echo ""
+
+  read -rp "Have you successfully logged in as ${SYSADMIN_USER}? (yes/no): " SSH_CONFIRMED
+
+  if [ "$SSH_CONFIRMED" != "yes" ]; then
+    print_error "SSH not confirmed. Please test SSH before proceeding!"
+    echo ""
+    echo "Troubleshooting:"
+    echo "1. Check authorized_keys: cat /home/${SYSADMIN_USER}/.ssh/authorized_keys"
+    echo "2. Check SSH logs: sudo tail -f /var/log/auth.log"
+    echo "3. Verify firewall: sudo ufw status"
+    exit 1
+  fi
+
+  print_success "SSH access verified!"
+
+  # Handle original user
+  if [ "$ORIGINAL_INVOKING_USER" != "root" ] && [ "$ORIGINAL_INVOKING_USER" != "$SYSADMIN_USER" ]; then
+    echo ""
+    print_step "Managing original user: $ORIGINAL_INVOKING_USER"
+    echo ""
+    echo "What should we do with the default user '$ORIGINAL_INVOKING_USER'?"
+    echo ""
+    echo "1) Lock (Recommended) - Disable SSH, keep for console access"
+    echo "2) Keep Active - Leave unchanged"
+    echo "3) Skip - Decide later"
+    echo ""
+    read -rp "Choice (1/2/3): " USER_CHOICE
+
+    case $USER_CHOICE in
+      1)
+        # Lock the user
+        passwd -l "$ORIGINAL_INVOKING_USER" 2>/dev/null || true
+
+        # Disable SSH keys
+        if [ -d "/home/$ORIGINAL_INVOKING_USER/.ssh" ]; then
+          if [ -f "/home/$ORIGINAL_INVOKING_USER/.ssh/authorized_keys" ]; then
+            mv "/home/$ORIGINAL_INVOKING_USER/.ssh/authorized_keys" \
+               "/home/$ORIGINAL_INVOKING_USER/.ssh/authorized_keys.disabled" 2>/dev/null || true
+          fi
+        fi
+
+        # Remove from sudo group
+        if groups "$ORIGINAL_INVOKING_USER" | grep -q sudo; then
+          deluser "$ORIGINAL_INVOKING_USER" sudo 2>/dev/null || true
+        fi
+
+        print_success "User '$ORIGINAL_INVOKING_USER' locked (console access still works)"
+        ;;
+      2)
+        print_info "User '$ORIGINAL_INVOKING_USER' remains active"
+        ;;
+      3)
+        print_info "Skipped. Run './scripts/post-setup-user-cleanup.sh' later"
+        ;;
+      *)
+        print_warning "Invalid choice. Skipping."
+        ;;
+    esac
+  fi
+fi
+
+# =================================================================
 # Setup Complete
 # =================================================================
 
@@ -876,21 +958,23 @@ echo "  ✓ Users: $SYSADMIN_USER (sudo), $APPMGR_USER (docker)"
 echo "  ✓ Docker installed with security defaults"
 echo "  ✓ Log rotation configured"
 echo "  ✓ Maintenance cron jobs installed"
+echo "  ✓ ${SYSADMIN_USER} configured with passwordless sudo"
+if [ -n "${ORIGINAL_INVOKING_USER:-}" ] && [ "$ORIGINAL_INVOKING_USER" != "root" ]; then
+  echo "  ✓ Original user (${ORIGINAL_INVOKING_USER}) handled"
+fi
+echo ""
+echo -e "${CYAN}Your hardened VPS is ready!${NC}"
 echo ""
 echo -e "${YELLOW}Next Steps:${NC}"
-echo "  1. Test SSH access: ssh $SYSADMIN_USER@<server-ip>"
-echo "  2. If SSH works, reload SSH: sudo systemctl reload sshd"
-echo "  3. Install cloudflared: sudo ./scripts/install-cloudflared.sh"
-echo "  4. After tunnel works, remove direct SSH: sudo ufw delete allow OpenSSH"
-echo "  5. Follow SETUP.md for complete configuration"
+echo "  1. Set up Cloudflare Tunnel: sudo ./scripts/install-cloudflared.sh"
+echo "  2. Deploy your first app: cp -r apps/_template apps/myapp"
+echo "  3. Set up GitOps CI/CD: See .github/workflows/deploy.yml"
+echo "  4. Review docs/ for detailed guides"
 echo ""
-echo -e "${RED}⚠  IMPORTANT: Test SSH access before closing this session!${NC}"
-echo ""
-
-# Show verification commands
-echo "Verification commands:"
+echo -e "${CYAN}Quick verification:${NC}"
 echo "  sysctl kernel.yama.ptrace_scope  # Should be 2"
 echo "  fail2ban-client status sshd      # Check fail2ban"
 echo "  systemctl status auditd          # Check auditd"
 echo "  ufw status                       # Check firewall"
+echo "  docker --version                 # Verify Docker"
 echo ""
