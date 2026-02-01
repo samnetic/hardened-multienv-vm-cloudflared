@@ -272,15 +272,9 @@ main() {
       print_warning "CNAME records not yet propagating (this is normal, may take a few minutes)"
     fi
 
-    # Remove old A records
+    # Remove old A records (function handles confirmation internally)
     echo ""
-    if confirm "Remove old A records now?" "y"; then
-      print_step "Removing old A records..."
-      remove_a_records "$CF_ZONE_ID" "$CF_API_TOKEN" "$DOMAIN"
-      print_success "Old A records removed"
-    else
-      print_warning "Skipping A record removal - you should remove them manually later"
-    fi
+    remove_a_records "$CF_ZONE_ID" "$CF_API_TOKEN" "$DOMAIN"
 
     DNS_MIGRATED_MANUALLY=false
   fi
@@ -467,36 +461,124 @@ add_cname_record() {
   fi
 }
 
+detect_vm_ip() {
+  # Try multiple methods to detect public IP
+  local ip=""
+
+  # Method 1: Check default route interface
+  ip=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+')
+
+  # Method 2: Query external service
+  if [ -z "$ip" ]; then
+    ip=$(curl -s https://api.ipify.org 2>/dev/null)
+  fi
+
+  # Method 3: Query Cloudflare
+  if [ -z "$ip" ]; then
+    ip=$(curl -s https://1.1.1.1/cdn-cgi/trace 2>/dev/null | grep -oP 'ip=\K[^$]+')
+  fi
+
+  echo "$ip"
+}
+
+list_a_records_for_ip() {
+  local zone_id="$1"
+  local token="$2"
+  local target_ip="$3"
+
+  # Get all A records for the zone
+  local records=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records?type=A" \
+    -H "Authorization: Bearer $token" \
+    -H "Content-Type: application/json")
+
+  # Parse JSON to find records pointing to target IP
+  # Format: id|name|content
+  echo "$records" | grep -oP '"type":"A"[^}]+' | while read -r record; do
+    local record_id=$(echo "$record" | grep -oP '"id":"\K[^"]+' | head -1)
+    local record_name=$(echo "$record" | grep -oP '"name":"\K[^"]+' | head -1)
+    local record_content=$(echo "$record" | grep -oP '"content":"\K[^"]+' | head -1)
+
+    if [ "$record_content" = "$target_ip" ]; then
+      echo "$record_id|$record_name|$record_content"
+    fi
+  done
+}
+
 remove_a_records() {
   local zone_id="$1"
   local token="$2"
   local domain="$3"
 
-  # Get all A records for domain
-  local records=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records?type=A" \
-    -H "Authorization: Bearer $token" \
-    -H "Content-Type: application/json")
+  # Detect VM's public IP
+  print_step "Detecting VM's public IP address..."
+  local vm_ip=$(detect_vm_ip)
 
-  # Extract record IDs
-  local record_ids=$(echo "$records" | grep -oP '"id":"\K[^"]+')
+  if [ -z "$vm_ip" ]; then
+    print_warning "Could not detect VM's public IP"
+    print_info "You should manually remove A records pointing to your VM"
+    return 1
+  fi
 
-  if [ -z "$record_ids" ]; then
-    print_info "No A records found to remove"
+  print_success "VM IP detected: $vm_ip"
+  echo ""
+
+  # List A records pointing to this IP
+  print_step "Scanning for A records pointing to $vm_ip..."
+  local exposed_records=$(list_a_records_for_ip "$zone_id" "$token" "$vm_ip")
+
+  if [ -z "$exposed_records" ]; then
+    print_success "No A records found pointing to $vm_ip"
     return 0
   fi
 
-  # Delete each A record
-  while IFS= read -r record_id; do
+  # Show exposed records
+  echo ""
+  print_warning "Found A records exposing your VM IP:"
+  echo ""
+  echo "  Name                    IP Address          Status"
+  echo "  ─────────────────────────────────────────────────────"
+
+  while IFS='|' read -r record_id record_name record_content; do
+    printf "  %-23s %-19s ${RED}EXPOSED${NC}\n" "$record_name" "$record_content"
+  done <<< "$exposed_records"
+
+  echo ""
+  print_warning "These records bypass Cloudflare protection and expose your real IP!"
+  echo ""
+
+  if ! confirm "Remove these A records?" "y"; then
+    print_info "Skipping A record removal"
+    print_warning "Your VM IP is still exposed via DNS"
+    return 0
+  fi
+
+  # Delete each exposed A record
+  print_step "Removing exposed A records..."
+  local removed=0
+  local failed=0
+
+  while IFS='|' read -r record_id record_name record_content; do
     local response=$(curl -s -X DELETE "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records/$record_id" \
       -H "Authorization: Bearer $token" \
       -H "Content-Type: application/json")
 
     if echo "$response" | grep -q '"success":true'; then
-      print_success "Removed A record: $record_id"
+      print_success "Removed: $record_name → $record_content"
+      ((removed++))
     else
-      print_warning "Failed to remove A record: $record_id"
+      print_error "Failed to remove: $record_name"
+      ((failed++))
     fi
-  done <<< "$record_ids"
+  done <<< "$exposed_records"
+
+  echo ""
+  if [ $removed -gt 0 ]; then
+    print_success "Removed $removed A record(s)"
+  fi
+
+  if [ $failed -gt 0 ]; then
+    print_warning "$failed A record(s) could not be removed"
+  fi
 }
 
 # Run main function
