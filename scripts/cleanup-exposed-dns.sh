@@ -271,6 +271,13 @@ main() {
   FAILED=0
 
   while IFS='|' read -r record_id record_name record_content; do
+    # Skip empty lines
+    if [ -z "$record_id" ]; then
+      continue
+    fi
+
+    print_info "Deleting: $record_name..."
+
     RESPONSE=$(curl -s -X DELETE "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/dns_records/$record_id" \
       -H "Authorization: Bearer $CF_API_TOKEN" \
       -H "Content-Type: application/json")
@@ -280,9 +287,13 @@ main() {
       ((REMOVED++))
     else
       print_error "Failed to remove: $record_name"
-      echo "$RESPONSE" | grep -oP '"message":"\K[^"]+' || true
+      ERROR_MSG=$(echo "$RESPONSE" | grep -oP '"message":"\K[^"]+' || echo "Unknown error")
+      echo "  Error: $ERROR_MSG"
       ((FAILED++))
     fi
+
+    # Small delay between API calls
+    sleep 0.5
   done <<< "$EXPOSED_RECORDS"
 
   echo ""

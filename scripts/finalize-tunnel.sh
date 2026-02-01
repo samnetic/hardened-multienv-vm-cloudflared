@@ -608,6 +608,13 @@ remove_a_records() {
   local failed=0
 
   while IFS='|' read -r record_id record_name record_content; do
+    # Skip empty lines
+    if [ -z "$record_id" ]; then
+      continue
+    fi
+
+    print_info "Deleting: $record_name..."
+
     local response=$(curl -s -X DELETE "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records/$record_id" \
       -H "Authorization: Bearer $token" \
       -H "Content-Type: application/json")
@@ -617,8 +624,13 @@ remove_a_records() {
       ((removed++))
     else
       print_error "Failed to remove: $record_name"
+      local error_msg=$(echo "$response" | grep -oP '"message":"\K[^"]+' || echo "Unknown error")
+      echo "  Error: $error_msg"
       ((failed++))
     fi
+
+    # Small delay between API calls
+    sleep 0.5
   done <<< "$exposed_records"
 
   echo ""
