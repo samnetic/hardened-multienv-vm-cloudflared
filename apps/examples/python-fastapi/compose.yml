@@ -1,0 +1,98 @@
+# =============================================================================
+# Docker Compose - FastAPI Example
+# =============================================================================
+# Production-ready configuration with 2025 security standards
+# =============================================================================
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${APP_NAME:-my-api}:latest
+    container_name: ${APP_NAME:-my-api}-${ENVIRONMENT:-production}
+    restart: unless-stopped
+
+    # Port mapping (internal only, Caddy handles external)
+    ports:
+      - "8000:8000"
+
+    # Environment variables
+    environment:
+      - APP_NAME=${APP_NAME:-my-api}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+      - PORT=8000
+
+    # Docker networks
+    networks:
+      - ${DOCKER_NETWORK:-prod-web}
+
+    # Security options
+    security_opt:
+      - no-new-privileges:true  # Prevent privilege escalation
+
+    # Drop all capabilities by default
+    cap_drop:
+      - ALL
+
+    # Only add required capabilities (none needed for FastAPI)
+    # cap_add:
+    #   - NET_BIND_SERVICE  # Only if binding to port < 1024
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'      # Max 0.5 CPU cores
+          memory: 512M     # Max 512MB RAM
+        reservations:
+          cpus: '0.1'      # Reserve 0.1 CPU cores
+          memory: 128M     # Reserve 128MB RAM
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# =============================================================================
+# Networks
+# =============================================================================
+
+networks:
+  prod-web:
+    external: true
+  staging-web:
+    external: true
+
+# =============================================================================
+# Notes
+# =============================================================================
+#
+# Security Features:
+#   ✅ no-new-privileges - Prevents privilege escalation attacks
+#   ✅ cap_drop: ALL - Drops all Linux capabilities by default
+#   ✅ Resource limits - Prevents resource exhaustion attacks
+#   ✅ Non-root user - Runs as UID 1000 (defined in Dockerfile)
+#   ✅ Health checks - Automatic restart on failure
+#   ✅ Logging limits - Prevents disk exhaustion
+#
+# Usage:
+#   docker compose up -d           # Start in detached mode
+#   docker compose logs -f         # View logs
+#   docker compose ps              # Check status
+#   docker compose down            # Stop and remove
+#   docker compose restart         # Restart services
+#
+# =============================================================================

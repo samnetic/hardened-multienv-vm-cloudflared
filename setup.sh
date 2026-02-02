@@ -595,6 +595,40 @@ print_next_steps() {
   echo -e "${CYAN}Documentation:${NC}"
   echo "  See README.md and docs/ folder for detailed guides"
   echo ""
+
+  echo ""
+  echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo ""
+  echo -e "${YELLOW}Would you like to run the interactive setup wizard?${NC}"
+  echo ""
+  echo "The wizard will guide you through:"
+  echo "  • Initializing /srv infrastructure"
+  echo "  • Deploying your first application"
+  echo "  • Configuring reverse proxy and DNS"
+  echo ""
+
+  if confirm "Launch post-setup wizard now?" "y"; then
+    echo ""
+    print_step "Launching post-setup wizard..."
+    echo ""
+    sleep 2
+
+    # Launch wizard
+    if [ -f "$SCRIPT_DIR/scripts/post-setup-wizard.sh" ]; then
+      exec "$SCRIPT_DIR/scripts/post-setup-wizard.sh"
+    else
+      print_error "Wizard script not found: $SCRIPT_DIR/scripts/post-setup-wizard.sh"
+      echo ""
+      print_info "You can run it manually later:"
+      print_info "  ./scripts/post-setup-wizard.sh"
+      echo ""
+    fi
+  else
+    echo ""
+    print_info "You can run the wizard anytime:"
+    echo "  ./scripts/post-setup-wizard.sh"
+    echo ""
+  fi
 }
 
 # =================================================================
