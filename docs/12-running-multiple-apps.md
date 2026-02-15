@@ -36,10 +36,11 @@ apps/
 
 ## Caddyfile Routing
 
-Add routes for each app in `infra/reverse-proxy/Caddyfile`:
+Add routes for each app in `/srv/infrastructure/reverse-proxy/Caddyfile`:
 
 ```
 http://myapp.yourdomain.com {
+  import tunnel_only
   import security_headers
   reverse_proxy myapp-production:8080 {
     import proxy_headers
@@ -47,6 +48,7 @@ http://myapp.yourdomain.com {
 }
 
 http://staging-myapp.yourdomain.com {
+  import tunnel_only
   import security_headers
   reverse_proxy myapp-staging:8080 {
     import proxy_headers
@@ -56,7 +58,8 @@ http://staging-myapp.yourdomain.com {
 
 Reload Caddy after changes:
 ```bash
-sudo docker compose -f infra/reverse-proxy/compose.yml restart caddy
+cd /srv/infrastructure/reverse-proxy
+sudo docker compose restart caddy
 ```
 
 ## Database Per App

@@ -22,7 +22,7 @@ nano .env
 
 # Pull + start
 sudo docker compose pull
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 
 # Logs / health
 sudo docker compose logs -f
@@ -34,7 +34,7 @@ sudo docker compose exec app node -e "require('http').get('http://localhost:3000
 This is intentionally separated so CI/GitOps stays strict.
 
 ```bash
-sudo docker compose -f compose.yml -f compose.local.yml up -d --build
+sudo docker compose --compatibility -f compose.yml -f compose.local.yml up -d --build
 curl -fsS http://127.0.0.1:3000/health
 ```
 
@@ -66,4 +66,3 @@ Protect admin/API hostnames at the edge:
 - Use **SSO** for humans, **Service Tokens** for machine callers (webhooks/CI)
 
 See `docs/14-cloudflare-zero-trust.md`.
-

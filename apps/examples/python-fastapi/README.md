@@ -28,7 +28,7 @@ vim .env  # Set APP_NAME, DOCKER_NETWORK, IMAGE, etc.
 
 # GitOps-friendly: deploy a pre-built image (no host ports published)
 sudo docker compose pull
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 
 # View logs
 sudo docker compose logs -f
@@ -41,7 +41,7 @@ sudo docker compose exec api curl -f http://localhost:8000/api/v1/hello
 Optional: local/VM-side build + loopback port (convenience only, not GitOps-safe):
 
 ```bash
-sudo docker compose -f compose.yml -f compose.local.yml up -d --build
+sudo docker compose --compatibility -f compose.yml -f compose.local.yml up -d --build
 curl http://127.0.0.1:8000/health
 ```
 
@@ -51,6 +51,7 @@ Edit `/srv/infrastructure/reverse-proxy/Caddyfile`:
 
 ```caddyfile
 http://api.yourdomain.com {
+  import tunnel_only
   import security_headers
   reverse_proxy my-api-production:8000 {
     import proxy_headers
@@ -121,7 +122,7 @@ curl http://localhost:8000/health
 ```bash
 # Recommended: use the provided override for local builds
 sudo docker compose -f compose.yml -f compose.local.yml build
-sudo docker compose -f compose.yml -f compose.local.yml up -d
+sudo docker compose --compatibility -f compose.yml -f compose.local.yml up -d
 ```
 
 ## Security Features
@@ -253,7 +254,7 @@ sudo docker compose -f compose.yml -f compose.local.yml build --no-cache
 
 # If you're using a pre-built image:
 sudo docker compose pull
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 
 # Check Python version
 sudo docker compose exec api python --version

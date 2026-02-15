@@ -325,13 +325,14 @@ sudo docker compose logs -f
 ### 4.3 Add to Caddy
 
 ```bash
-cd ../../../infra/reverse-proxy
+cd /srv/infrastructure/reverse-proxy
 nano Caddyfile
 ```
 
 Update the staging block:
 ```caddyfile
 http://staging-app.yourdomain.com {
+  import tunnel_only
   import security_headers
   reverse_proxy app-staging:80 {
     import proxy_headers
@@ -370,8 +371,8 @@ curl https://staging-app.yourdomain.com
 Recommended (installs cloudflared + configures SSH for tunnel access):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com appmgr
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/HEAD/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/HEAD/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com appmgr
 ```
 
 Manual install (if you prefer):
@@ -405,7 +406,7 @@ To avoid typing that long ProxyCommand every time, configure SSH:
 
 Recommended shortcut (this blueprint's helper):
 ```bash
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/HEAD/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
 
 # Default alias is the first label of your domain:
 ssh yourdomain
@@ -568,13 +569,14 @@ sudo docker compose ps
 ### 6.3 Add to Caddy
 
 ```bash
-cd ../../../infra/reverse-proxy
+cd /srv/infrastructure/reverse-proxy
 nano Caddyfile
 ```
 
 Update production block:
 ```caddyfile
 http://app.yourdomain.com {
+  import tunnel_only
   import security_headers
   reverse_proxy app-production:80 {
     import proxy_headers
@@ -649,13 +651,14 @@ sudo docker compose --compatibility up -d
 ### 7.5 Add to Caddy
 
 ```bash
-cd ../../infra/reverse-proxy
+cd /srv/infrastructure/reverse-proxy
 nano Caddyfile
 ```
 
 Add:
 ```caddyfile
 http://staging-my-app.yourdomain.com {
+  import tunnel_only
   import security_headers
   reverse_proxy app-my-app:3000 {
     import proxy_headers

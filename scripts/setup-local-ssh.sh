@@ -12,10 +12,10 @@
 #
 # Usage:
 #   # Download and run directly:
-#   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin ~/.ssh/id_rsa
+#   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/HEAD/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin ~/.ssh/id_rsa
 #
 #   # Or download, review, then run:
-#   wget https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh
+#   wget https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/HEAD/scripts/setup-local-ssh.sh
 #   chmod +x setup-local-ssh.sh
 #   ./setup-local-ssh.sh ssh.yourdomain.com sysadmin ~/.ssh/id_rsa
 #
@@ -33,6 +33,14 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
+
+# For interactive prompts when the script is run via a pipe (curl | bash -s),
+# stdin is the script body. Read prompts from /dev/tty instead.
+TTY_FD=""
+if [ -r /dev/tty ]; then
+  exec 3</dev/tty
+  TTY_FD="3"
+fi
 
 # =================================================================
 # Helper Functions
@@ -66,6 +74,26 @@ print_info() {
   echo -e "${BLUE}ℹ $1${NC}"
 }
 
+read_prompt() {
+  local __var="$1"
+  local __prompt="$2"
+  local __default="${3:-}"
+  local __value=""
+
+  if [ -n "${TTY_FD:-}" ]; then
+    printf "%s" "$__prompt" > /dev/tty
+    IFS= read -r -u "$TTY_FD" __value || true
+  else
+    IFS= read -r -p "$__prompt" __value || true
+  fi
+
+  if [ -z "$__value" ] && [ -n "$__default" ]; then
+    __value="$__default"
+  fi
+
+  printf -v "$__var" "%s" "$__value"
+}
+
 confirm() {
   local prompt="$1"
   local default="${2:-n}"
@@ -76,8 +104,9 @@ confirm() {
     prompt="$prompt [y/N]: "
   fi
 
-  read -rp "$prompt" response
-  response=${response:-$default}
+  local response=""
+  read_prompt response "$prompt" ""
+  response="${response:-$default}"
 
   [[ "$response" =~ ^[Yy]$ ]]
 }
@@ -120,7 +149,14 @@ if [ -z "$IDENTITY_FILE" ]; then
   if [ ${#AVAILABLE_KEYS[@]} -eq 0 ]; then
     print_error "No SSH private keys found in ~/.ssh/"
     echo ""
-    read -rp "Enter path to your SSH private key: " IDENTITY_FILE
+    if [ -n "${TTY_FD:-}" ]; then
+      read_prompt IDENTITY_FILE "Enter path to your SSH private key: " ""
+    else
+      print_error "No TTY available to prompt for identity file."
+      print_info "Re-run with an explicit identity_file argument:"
+      print_info "  $0 ssh.yourdomain.com ${SSH_USER} ~/.ssh/id_ed25519"
+      exit 1
+    fi
 
     if [ ! -f "$IDENTITY_FILE" ]; then
       print_error "Identity file not found: $IDENTITY_FILE"
@@ -148,7 +184,14 @@ if [ -z "$IDENTITY_FILE" ]; then
     done
 
     echo ""
-    read -rp "Select key (1-${#AVAILABLE_KEYS[@]}): " key_selection
+    if [ -n "${TTY_FD:-}" ]; then
+      read_prompt key_selection "Select key (1-${#AVAILABLE_KEYS[@]}): " ""
+    else
+      print_error "Multiple SSH keys found but no TTY available to prompt."
+      print_info "Re-run with an explicit identity_file argument:"
+      print_info "  $0 ssh.yourdomain.com ${SSH_USER} ~/.ssh/id_ed25519"
+      exit 1
+    fi
 
     # Validate selection
     if ! [[ "$key_selection" =~ ^[0-9]+$ ]] || [ "$key_selection" -lt 1 ] || [ "$key_selection" -gt ${#AVAILABLE_KEYS[@]} ]; then
@@ -247,8 +290,18 @@ install_cloudflared() {
       $SUDO mkdir -p --mode=0755 /usr/share/keyrings
       curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | $SUDO tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
 
+      codename="$(lsb_release -cs 2>/dev/null || true)"
+      if [ -z "$codename" ] && [ -f /etc/os-release ]; then
+        . /etc/os-release
+        codename="${VERSION_CODENAME:-}"
+      fi
+      if [ -z "$codename" ]; then
+        print_error "Could not detect distro codename (install lsb-release or ensure /etc/os-release has VERSION_CODENAME)"
+        exit 1
+      fi
+
       # Add repository
-      echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs) main" | $SUDO tee /etc/apt/sources.list.d/cloudflared.list
+      echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared ${codename} main" | $SUDO tee /etc/apt/sources.list.d/cloudflared.list
 
       # Install
       $SUDO apt update
@@ -418,7 +471,7 @@ test_ssh() {
 # =================================================================
 
 main() {
-  clear
+  if [ -t 1 ]; then clear; fi
   print_header "Local SSH Setup for Cloudflare Tunnel"
 
   echo "  SSH Hostname: $SSH_HOSTNAME"

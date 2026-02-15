@@ -22,7 +22,7 @@ nano Caddyfile
 # Replace all instances of "yourdomain.com" with your actual domain
 
 # Start Caddy
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 
 # View logs
 sudo docker compose logs -f
@@ -39,11 +39,19 @@ The Caddyfile uses HTTP-only because Cloudflare Tunnel handles HTTPS:
 
 ```caddyfile
 http://staging-app.yourdomain.com {
-  reverse_proxy app-staging:80
+  import tunnel_only
+  import security_headers
+  reverse_proxy app-staging:80 {
+    import proxy_headers
+  }
 }
 
 http://app.yourdomain.com {
-  reverse_proxy app-production:80
+  import tunnel_only
+  import security_headers
+  reverse_proxy app-production:80 {
+    import proxy_headers
+  }
 }
 ```
 
@@ -53,6 +61,7 @@ http://app.yourdomain.com {
 
 ```caddyfile
 http://new-app.yourdomain.com {
+  import tunnel_only
   import security_headers
   reverse_proxy new-app-container:port {
     import proxy_headers

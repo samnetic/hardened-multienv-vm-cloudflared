@@ -286,7 +286,7 @@ sudo mv cloudflared /usr/local/bin/
 This blueprint ships a helper that installs `cloudflared` (if needed) and writes `~/.ssh/config` for you:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/HEAD/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
 
 # Default alias is the first label of your domain:
 ssh yourdomain

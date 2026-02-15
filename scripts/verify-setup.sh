@@ -419,7 +419,7 @@ test_ssh_access() {
     echo -e "${CYAN}  # (connects to ssh.${tunnel_domain} as ${SYSADMIN_USER})${NC}"
     echo ""
     echo "Tip: if you haven't configured your local SSH alias yet:"
-    echo -e "${CYAN}  curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.${tunnel_domain} ${SYSADMIN_USER}${NC}"
+    echo -e "${CYAN}  curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/HEAD/scripts/setup-local-ssh.sh | bash -s -- ssh.${tunnel_domain} ${SYSADMIN_USER}${NC}"
   else
     echo -e "${CYAN}  ssh ${SYSADMIN_USER}@YOUR_SERVER_IP${NC}"
     echo ""

@@ -47,7 +47,7 @@ Each environment directory is a deployment checkout (often a single "deployments
     compose.yml
 ```
 
-GitHub Actions syncs your deployments repo to `/srv/apps/<env>` and triggers a guarded deploy via `hosting deploy <env>`, which runs `docker compose up -d` per app directory with policy checks.
+GitHub Actions syncs your deployments repo to `/srv/apps/<env>` and triggers a guarded deploy via `hosting deploy <env>`, which runs `docker compose --compatibility up -d` per app directory with policy checks.
 
 ### `/var/secrets/{dev,staging,production}` (Secrets)
 

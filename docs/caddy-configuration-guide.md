@@ -31,7 +31,7 @@ sudo docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
 ## Critical Security Notes
 
 - Keep `import tunnel_only` in every site block. It prevents origin IP bypass and container-to-container bypass.
-- `hosting-caddy-origin` must exist (created by `sudo ./scripts/create-networks.sh`) and must remain the **first** network attached to the Caddy container (see `infra/reverse-proxy/compose.yml`), otherwise `tunnel_only` allowlists can break.
+- `hosting-caddy-origin` must exist (created by `sudo ./scripts/create-networks.sh`) and must remain the **first** network attached to the Caddy container (see `/srv/infrastructure/reverse-proxy/compose.yml`), otherwise `tunnel_only` allowlists can break.
 - Don’t publish app container ports to the host. Route through Caddy on Docker networks.
 
 ## Safe Editing Workflow
@@ -40,10 +40,11 @@ sudo docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
 
 ```bash
 # 1. Edit Caddyfile
-nano /opt/hosting-blueprint/infra/reverse-proxy/Caddyfile
+cd /srv/infrastructure/reverse-proxy
+nano Caddyfile
 
 # 2. Run safe update script
-sudo /opt/hosting-blueprint/scripts/update-caddy.sh
+sudo /opt/hosting-blueprint/scripts/update-caddy.sh /srv/infrastructure/reverse-proxy
 ```
 
 This script:
@@ -56,7 +57,7 @@ This script:
 ### Method 2: Manual Validation
 
 ```bash
-cd /opt/hosting-blueprint/infra/reverse-proxy
+cd /srv/infrastructure/reverse-proxy
 
 # Edit
 nano Caddyfile
@@ -80,6 +81,7 @@ sudo docker compose logs caddy --tail 20
 ```caddyfile
 # Add this to Caddyfile
 http://myapp.yourdomain.com {
+  import tunnel_only
   import security_headers
 
   reverse_proxy app-myapp:8080 {
@@ -100,6 +102,7 @@ http://myapp.yourdomain.com {
 
 ```caddyfile
 http://static.yourdomain.com {
+  import tunnel_only
   import security_headers
   root * /srv/static
   file_server
@@ -110,6 +113,7 @@ http://static.yourdomain.com {
 
 ```caddyfile
 http://api.yourdomain.com {
+  import tunnel_only
   import security_headers
 
   # CORS headers for API
@@ -129,10 +133,12 @@ http://api.yourdomain.com {
 
 ```caddyfile
 http://yourdomain.com {
+  import tunnel_only
   redir https://www.yourdomain.com{uri} permanent
 }
 
 http://www.yourdomain.com {
+  import tunnel_only
   import security_headers
   reverse_proxy app-production:80 {
     import proxy_headers
@@ -184,7 +190,7 @@ curl https://dev-app.yourdomain.com
 ### 3. Check Logs
 
 ```bash
-cd /opt/hosting-blueprint/infra/reverse-proxy
+cd /srv/infrastructure/reverse-proxy
 
 # Real-time logs
 sudo docker compose logs caddy -f
@@ -229,7 +235,7 @@ sudo lsof -i :443
 
 ```bash
 # Automatic backups at
-cd /opt/hosting-blueprint/infra/reverse-proxy/backups
+cd /srv/infrastructure/reverse-proxy/backups
 
 # List backups
 ls -lt
@@ -265,6 +271,7 @@ Caddy is **sensitive to indentation**:
 ```caddyfile
 # CORRECT
 http://yourdomain.com {
+  import tunnel_only
   reverse_proxy app:80 {
     header_up X-Real-IP {remote_host}
   }
@@ -272,6 +279,7 @@ http://yourdomain.com {
 
 # WRONG (inconsistent indentation)
 http://yourdomain.com {
+import tunnel_only
 reverse_proxy app:80 {
   header_up X-Real-IP {remote_host}
   }

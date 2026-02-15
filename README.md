@@ -37,7 +37,7 @@
 SSH to your VM and run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/bootstrap.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/HEAD/bootstrap.sh | sudo bash
 ```
 
 That's it! The script will:

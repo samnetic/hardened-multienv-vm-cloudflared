@@ -116,13 +116,25 @@ fi
 NETDATA_ENV="${INFRA_ROOT}/monitoring/.env"
 NETDATA_EXAMPLE="${INFRA_ROOT}/monitoring/.env.example"
 
-if [ -f "$NETDATA_EXAMPLE" ]; then
-  sed -i "s/HOSTNAME=.*/HOSTNAME=${HOSTNAME}/" "$NETDATA_EXAMPLE"
-  echo -e "${GREEN}✓${NC} Updated Netdata .env.example"
+# Create .env from example if missing, then update HOSTNAME there.
+if [ ! -f "$NETDATA_ENV" ]; then
+  if [ -f "$NETDATA_EXAMPLE" ]; then
+    cp "$NETDATA_EXAMPLE" "$NETDATA_ENV"
+    echo -e "${GREEN}✓${NC} Created Netdata .env from example"
+  else
+    mkdir -p "$(dirname "$NETDATA_ENV")"
+    echo "HOSTNAME=${HOSTNAME}" > "$NETDATA_ENV"
+    echo -e "${GREEN}✓${NC} Created Netdata .env"
+  fi
 fi
 
 if [ -f "$NETDATA_ENV" ]; then
-  sed -i "s/HOSTNAME=.*/HOSTNAME=${HOSTNAME}/" "$NETDATA_ENV"
+  if grep -q "^HOSTNAME=" "$NETDATA_ENV"; then
+    sed -i "s/^HOSTNAME=.*/HOSTNAME=${HOSTNAME}/" "$NETDATA_ENV"
+  else
+    echo "HOSTNAME=${HOSTNAME}" >> "$NETDATA_ENV"
+  fi
+  chmod 600 "$NETDATA_ENV" 2>/dev/null || true
   echo -e "${GREEN}✓${NC} Updated Netdata .env"
 fi
 

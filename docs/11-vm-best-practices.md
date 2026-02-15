@@ -351,7 +351,7 @@ sudo docker compose ps
 sudo docker inspect --format='{{.State.Health.Status}}' container
 
 # Can Caddy reach it?
-sudo docker compose -f infra/reverse-proxy/compose.yml logs caddy
+sudo docker compose -f /srv/infrastructure/reverse-proxy/compose.yml logs caddy
 
 # Is Cloudflare tunnel up?
 sudo systemctl status cloudflared

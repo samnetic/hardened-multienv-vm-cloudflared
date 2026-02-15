@@ -10,7 +10,7 @@ Common issues and solutions for the production hosting blueprint.
 # Check all services
 sudo docker ps                              # All containers
 sudo systemctl status cloudflared      # Tunnel
-cd infra/reverse-proxy && sudo docker compose ps  # Caddy
+cd /srv/infrastructure/reverse-proxy && sudo docker compose ps  # Caddy
 
 # Check logs
 sudo docker compose logs -f                 # App logs
@@ -41,12 +41,12 @@ sudo systemctl status cloudflared
 sudo journalctl -u cloudflared --since "5 minutes ago"
 
 # 2. Check Caddy
-cd infra/reverse-proxy
+cd /srv/infrastructure/reverse-proxy
 sudo docker compose ps
 sudo docker compose logs caddy --tail=50
 
 # 3. Check app
-cd apps/my-app
+cd /srv/apps/staging/my-app
 sudo docker compose ps
 sudo docker compose logs --tail=50
 
@@ -61,11 +61,11 @@ sudo docker network inspect staging-web
 sudo systemctl restart cloudflared
 
 # Restart Caddy
-cd infra/reverse-proxy
+cd /srv/infrastructure/reverse-proxy
 sudo docker compose restart caddy
 
 # Restart app
-cd apps/my-app
+cd /srv/apps/staging/my-app
 sudo docker compose restart
 ```
 
@@ -129,7 +129,7 @@ sudo ./scripts/create-networks.sh
 cd /srv/infrastructure/reverse-proxy
 sudo docker compose --compatibility up -d
 
-# If you intentionally changed the gateway/subnet, update infra/reverse-proxy/Caddyfile (tunnel_only)
+# If you intentionally changed the gateway/subnet, update /srv/infrastructure/reverse-proxy/Caddyfile (tunnel_only)
 # then reload:
 sudo ./scripts/update-caddy.sh /srv/infrastructure/reverse-proxy
 ```
@@ -332,7 +332,7 @@ ssh -o ProxyCommand="cloudflared access ssh --hostname ssh.yourdomain.com" sysad
 
 Quick setup (recommended):
 ```bash
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/HEAD/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
 
 # Default alias is the first label of your domain:
 ssh yourdomain
@@ -357,7 +357,7 @@ Then use: `ssh myserver`
 
 ```bash
 # Recommended (installs cloudflared + configures SSH for tunnel access)
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/HEAD/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
 
 # Manual install (if you prefer)
 # macOS: brew install cloudflared
@@ -490,7 +490,7 @@ ssh -v myserver
 **1. cloudflared Not Installed Locally**
 ```bash
 # Recommended (installs cloudflared + configures SSH)
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/HEAD/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
 
 # Manual:
 # macOS: brew install cloudflared
@@ -607,7 +607,7 @@ chmod 644 Dockerfile
 
 **Diagnosis:**
 ```bash
-cd infra/reverse-proxy
+cd /srv/infrastructure/reverse-proxy
 sudo docker compose logs caddy
 sudo docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile
 ```
@@ -708,7 +708,7 @@ deploy:
 sudo systemctl restart cloudflared
 
 # 2. Check Caddy
-cd infra/reverse-proxy
+cd /srv/infrastructure/reverse-proxy
 sudo docker compose restart
 
 # 3. Check all apps

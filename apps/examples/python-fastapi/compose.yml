@@ -94,7 +94,7 @@ networks:
 # Usage:
 #   # Pre-built image:
 #   sudo docker compose pull
-#   sudo docker compose up -d
+#   sudo docker compose --compatibility up -d
 #
 #   # Local/VM-side build (convenience only):
 #   sudo docker compose -f compose.yml -f compose.local.yml up -d --build

@@ -36,7 +36,7 @@ sudo /opt/hosting-blueprint/scripts/monitoring/init-monitoring-server.sh
 4. Start:
 
 ```bash
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 ```
 
 5. Expose Grafana via Cloudflare Tunnel:

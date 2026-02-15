@@ -342,9 +342,9 @@ sudo docker compose logs --tail=100
 | File | Purpose | Location |
 |------|---------|----------|
 | `config.yml` | Tunnel config | `/etc/cloudflared/` |
-| `Caddyfile` | Routing rules | `infra/reverse-proxy/` |
-| `compose.yml` | App definition | `apps/*/` |
-| `.env` | App secrets | `apps/*/.env` (gitignored) |
+| `Caddyfile` | Routing rules | `/srv/infrastructure/reverse-proxy/` |
+| `compose.yml` | App definition | `/srv/apps/{dev,staging,production}/*/` |
+| `.env` | App config | `/srv/apps/{dev,staging,production}/*/.env` (gitignored) |
 | `daemon.json` | Docker config | `/etc/docker/` |
 | `sshd_config` | SSH hardening | `/etc/ssh/` |
 
@@ -354,7 +354,7 @@ sudo docker compose logs --tail=100
 
 **Infrastructure:**
 - Tunnel: `systemctl status cloudflared`
-- Caddy: `sudo docker compose ps`
+- Caddy: `cd /srv/infrastructure/reverse-proxy && sudo docker compose ps`
 - Firewall: `ufw status`
 
 **Applications:**

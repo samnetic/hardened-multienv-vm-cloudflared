@@ -23,7 +23,7 @@ sudo /opt/hosting-blueprint/scripts/secrets/create-secret.sh staging postgres_pa
 2. Start:
 
 ```bash
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 ```
 
 3. Connect from an app container on the same backend network:

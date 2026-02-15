@@ -155,7 +155,7 @@ Run these commands on a fresh VM to verify everything works:
 
 ```bash
 # 1. One-liner install (replace URL with your repo)
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/bootstrap.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/HEAD/bootstrap.sh | sudo bash
 
 # 2. Verify setup
 cd /opt/hosting-blueprint
@@ -167,7 +167,7 @@ cd /opt/hosting-blueprint
 # 4. Deploy example app
 cp -r apps/examples/hello-world /srv/apps/production/test-app
 cd /srv/apps/production/test-app
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 
 # 5. Verify zero open ports
 nmap -p- $(hostname -I | awk '{print $1}')

@@ -13,7 +13,7 @@ Default goals:
 ```bash
 cd /srv/infrastructure/monitoring-agent
 cp .env.example .env
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 ```
 
 ## Optional: Per-Container Metrics (cAdvisor)
@@ -21,7 +21,7 @@ sudo docker compose up -d
 If you need per-container CPU/memory/filesystem metrics, enable the optional override:
 
 ```bash
-sudo docker compose -f compose.yml -f compose.cadvisor.yml up -d
+sudo docker compose --compatibility -f compose.yml -f compose.cadvisor.yml up -d
 ```
 
 Security note:
@@ -33,4 +33,3 @@ Guide:
 
 - `docs/17-monitoring-separate-vps.md`
 - `docs/18-monitoring-server.md`
-

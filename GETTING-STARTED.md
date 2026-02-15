@@ -17,7 +17,7 @@ SSH to your VM and run:
 ```bash
 # From your LOCAL machine (recommended):
 # 1) Configure tunnel SSH once (creates a short alias like: ssh yourdomain)
-# curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+# curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/HEAD/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
 #
 # 2) SSH using the generated alias (first label of your domain)
 ssh yourdomain
@@ -91,13 +91,14 @@ vim compose.yml  # Set image, ports, etc.
 vim .env         # Environment variables
 
 # 3. Start app
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 
 # 4. Add to Caddy
 vim /srv/infrastructure/reverse-proxy/Caddyfile
 
 # Add this block:
 http://myapp.yourdomain.com {
+  import tunnel_only
   import security_headers
   reverse_proxy app-myapp:8080 {
     import proxy_headers

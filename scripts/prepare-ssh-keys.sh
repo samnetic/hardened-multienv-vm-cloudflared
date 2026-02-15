@@ -242,7 +242,7 @@ main() {
   print_info "   ssh root@your-vm-ip"
   echo
   print_step "2. Run the one-liner setup:"
-  print_info "   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/bootstrap.sh | sudo bash"
+  print_info "   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/HEAD/bootstrap.sh | sudo bash"
   echo
   print_step "3. When prompted, paste the public keys shown above"
   echo

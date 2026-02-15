@@ -47,7 +47,7 @@ sudo docker compose pull
 # - Then: sudo docker compose build
 
 # Start app
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 
 # View logs
 sudo docker compose logs -f
@@ -58,10 +58,11 @@ sudo docker compose ps
 
 ### 5. Add to Caddy
 
-Edit `infra/reverse-proxy/Caddyfile` and add:
+Edit `/srv/infrastructure/reverse-proxy/Caddyfile` and add:
 
 ```caddyfile
 http://my-app.yourdomain.com {
+  import tunnel_only
   import security_headers
   reverse_proxy app-my-app:3000 {
     import proxy_headers
@@ -72,7 +73,7 @@ http://my-app.yourdomain.com {
 Restart Caddy:
 
 ```bash
-cd infra/reverse-proxy
+cd /srv/infrastructure/reverse-proxy
 sudo docker compose restart caddy
 ```
 

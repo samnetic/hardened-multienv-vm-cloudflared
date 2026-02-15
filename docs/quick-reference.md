@@ -111,6 +111,7 @@ vim /srv/infrastructure/reverse-proxy/Caddyfile
 
 # Add:
 http://myapp.yourdomain.com {
+  import tunnel_only
   import security_headers
   reverse_proxy app-myapp:8080 {
     import proxy_headers
@@ -186,6 +187,7 @@ sudo docker compose -f /srv/apps/production/myapp/compose.yml restart
 ### Basic App
 ```caddyfile
 http://app.yourdomain.com {
+  import tunnel_only
   import security_headers
   reverse_proxy app-production:80 {
     import proxy_headers
@@ -196,6 +198,7 @@ http://app.yourdomain.com {
 ### API with CORS
 ```caddyfile
 http://api.yourdomain.com {
+  import tunnel_only
   import security_headers
 
   header {
@@ -212,6 +215,7 @@ http://api.yourdomain.com {
 ### Static Files
 ```caddyfile
 http://static.yourdomain.com {
+  import tunnel_only
   import security_headers
   root * /srv/static
   file_server
@@ -221,6 +225,7 @@ http://static.yourdomain.com {
 ### Redirect
 ```caddyfile
 http://old.yourdomain.com {
+  import tunnel_only
   redir https://new.yourdomain.com{uri} permanent
 }
 ```

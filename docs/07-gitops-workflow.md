@@ -190,7 +190,7 @@ When ready for production:
 
 ```bash
 git checkout -b feature/update-caddyfile
-# Edit infra/reverse-proxy/Caddyfile
+# Edit reverse-proxy/Caddyfile (in your /srv/infrastructure repo)
 git add .
 git commit -m "Update Caddy routing for new app"
 git push

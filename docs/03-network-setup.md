@@ -242,22 +242,34 @@ cloudflared → Caddy (localhost:80) → Docker containers
 
 ### Routing by Subdomain
 
-From `infra/reverse-proxy/Caddyfile`:
+From `/srv/infrastructure/reverse-proxy/Caddyfile`:
 
 ```caddyfile
 # Production
-app.yourdomain.com {
-    reverse_proxy app-production:8080
+http://app.yourdomain.com {
+  import tunnel_only
+  import security_headers
+  reverse_proxy app-production:80 {
+    import proxy_headers
+  }
 }
 
 # Staging
-staging-app.yourdomain.com {
-    reverse_proxy app-staging:8080
+http://staging-app.yourdomain.com {
+  import tunnel_only
+  import security_headers
+  reverse_proxy app-staging:80 {
+    import proxy_headers
+  }
 }
 
 # Development
-dev-app.yourdomain.com {
-    reverse_proxy app-dev:8080
+http://dev-app.yourdomain.com {
+  import tunnel_only
+  import security_headers
+  reverse_proxy app-dev:80 {
+    import proxy_headers
+  }
 }
 ```
 

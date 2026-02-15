@@ -5,7 +5,7 @@
 # One-liner installation script for fresh Ubuntu VMs
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/bootstrap.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/HEAD/bootstrap.sh | sudo bash
 #
 # What this does:
 #   1. Checks prerequisites (OS, root, resources, network)
@@ -36,6 +36,14 @@ NC='\033[0m'
 # Repository configuration
 REPO_URL="https://github.com/samnetic/hardened-multienv-vm-cloudflared.git"
 REPO_DIR="/opt/hosting-blueprint"
+
+# For interactive prompts when the script is run via a pipe (curl | sudo bash),
+# stdin is the script body. Read prompts from /dev/tty instead.
+TTY_FD=""
+if [ -r /dev/tty ]; then
+  exec 3</dev/tty
+  TTY_FD="3"
+fi
 
 # =================================================================
 # Helper Functions
@@ -76,6 +84,43 @@ show_progress() {
 
 hide_progress() {
   echo -e "\r\033[K"
+}
+
+read_prompt() {
+  local __var="$1"
+  local __prompt="$2"
+  local __default="${3:-}"
+  local __value=""
+
+  if [ -n "${TTY_FD:-}" ]; then
+    printf "%s" "$__prompt" > /dev/tty
+    IFS= read -r -u "$TTY_FD" __value || true
+  else
+    # Best-effort fallback (non-interactive installs should avoid prompts).
+    IFS= read -r -p "$__prompt" __value || true
+  fi
+
+  if [ -z "$__value" ] && [ -n "$__default" ]; then
+    __value="$__default"
+  fi
+
+  printf -v "$__var" "%s" "$__value"
+}
+
+confirm() {
+  local prompt="$1"
+  local default="${2:-n}"
+  local suffix="[y/N]"
+  local response=""
+
+  if [ "$default" = "y" ]; then
+    suffix="[Y/n]"
+  fi
+
+  read_prompt response "${prompt} ${suffix}: " ""
+  response="${response:-$default}"
+
+  [[ "$response" =~ ^[Yy]([Ee][Ss])?$ ]]
 }
 
 wait_for_apt() {
@@ -127,7 +172,7 @@ check_root() {
     print_error "This script must be run as root"
     echo ""
     echo "Please run:"
-    echo "  curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/bootstrap.sh | sudo bash"
+    echo "  curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/HEAD/bootstrap.sh | sudo bash"
     echo ""
     exit 1
   fi
@@ -184,8 +229,7 @@ check_resources() {
   if [ "$ram_mb" -lt 2048 ]; then
     print_warning "Only ${ram_gb}GB RAM available (2GB minimum)"
     echo ""
-    read -rp "Continue anyway? (yes/no): " continue_ram
-    if [ "$continue_ram" != "yes" ]; then
+    if ! confirm "Continue anyway?" "n"; then
       echo "Exiting."
       exit 1
     fi
@@ -206,8 +250,7 @@ check_resources() {
   if [ "$disk_gb" -lt 20 ]; then
     print_warning "Only ${disk_gb}GB disk space available (20GB minimum)"
     echo ""
-    read -rp "Continue anyway? (yes/no): " continue_disk
-    if [ "$continue_disk" != "yes" ]; then
+    if ! confirm "Continue anyway?" "n"; then
       echo "Exiting."
       exit 1
     fi
@@ -221,8 +264,18 @@ check_resources() {
 check_network() {
   print_step "Checking internet connectivity..."
 
-  if ! curl -s --max-time 5 https://1.1.1.1 > /dev/null 2>&1; then
-    print_error "No internet connectivity"
+  local TEST_URLS=("https://1.1.1.1" "https://www.cloudflare.com" "https://github.com")
+  local connected=false
+
+  for url in "${TEST_URLS[@]}"; do
+    if curl -fsS --connect-timeout 5 --max-time 10 "$url" >/dev/null 2>&1; then
+      connected=true
+      break
+    fi
+  done
+
+  if [ "$connected" != "true" ]; then
+    print_error "No internet connectivity (tried: ${TEST_URLS[*]})"
     echo ""
     echo "This script requires internet access to:"
     echo "  - Download the repository"
@@ -270,6 +323,10 @@ clone_repository() {
 
   # Check if repository already exists
   if [ -d "$REPO_DIR" ]; then
+    # Ensure root owns it before any git operations to avoid "dubious ownership".
+    chown -R root:root "$REPO_DIR" 2>/dev/null || true
+    chmod -R go-w "$REPO_DIR" 2>/dev/null || true
+
     print_warning "Repository already exists at $REPO_DIR"
     echo ""
     echo "Options:"
@@ -278,12 +335,17 @@ clone_repository() {
     echo "  3) Skip and use existing"
     echo "  4) Exit"
     echo ""
-    read -rp "Choice (1-4): " repo_choice
+    read_prompt repo_choice "Choice (1-4) [1]: " "1"
 
     case $repo_choice in
       1)
         print_step "Updating repository..."
         cd "$REPO_DIR"
+        if [ ! -d "$REPO_DIR/.git" ]; then
+          print_error "Directory exists but is not a git repository: $REPO_DIR"
+          print_info "Choose option 2 to remove + re-clone."
+          exit 1
+        fi
         git pull
         print_success "Repository updated"
         ;;
@@ -336,7 +398,7 @@ set_permissions() {
 # =================================================================
 
 main() {
-  clear
+  if [ -t 1 ]; then clear; fi
   print_header "Hardened VM Setup - Bootstrap"
 
   echo "This script will:"
@@ -352,8 +414,7 @@ main() {
   echo "  • Internet connectivity"
   echo ""
 
-  read -rp "Continue? (yes/no): " continue_bootstrap
-  if [ "$continue_bootstrap" != "yes" ]; then
+  if ! confirm "Continue?" "n"; then
     echo "Exiting."
     exit 0
   fi
@@ -393,7 +454,11 @@ main() {
 
   # Launch setup.sh
   cd "$REPO_DIR"
-  exec ./setup.sh
+  if [ -r /dev/tty ]; then
+    exec </dev/tty ./setup.sh
+  else
+    exec ./setup.sh
+  fi
 }
 
 # Run main function

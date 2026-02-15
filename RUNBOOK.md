@@ -35,7 +35,7 @@ sudo ufw status verbose                      # Firewall rules
 # Deploy/Update app (CI/CD deploys to /srv/apps/)
 cd /srv/apps/production/my-app
 sudo docker compose pull
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 
 # Restart services
 sudo docker compose restart                       # Current app
@@ -70,7 +70,7 @@ sudo systemctl status docker-compose@staging
 3. **Deploy:**
    ```bash
    sudo docker compose pull  # or build
-   sudo docker compose up -d
+   sudo docker compose --compatibility up -d
    sudo docker compose ps
    sudo docker compose logs -f
    ```
@@ -110,7 +110,7 @@ cd apps/my-app
 sudo docker compose pull
 
 # Restart with new image (zero-downtime if health checks configured)
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 
 # Verify
 sudo docker compose ps
@@ -135,7 +135,7 @@ git reset --hard HEAD~1
 
 # Restart containers with previous version
 sudo docker compose pull
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 
 # Verify
 sudo docker compose ps
@@ -153,7 +153,7 @@ docker images | grep my-app
 nano compose.yml  # Change image: my-app:v1.0.1
 
 # Deploy
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 ```
 
 **Option 3: Quick rollback using git reflog**
@@ -167,7 +167,7 @@ git reflog
 # Restore to specific reflog entry
 git reset --hard HEAD@{2}
 
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 ```
 
 ---
@@ -297,7 +297,7 @@ sudo docker compose restart app
 
 # Adjust resource limits in compose.yml
 nano compose.yml  # Update deploy.resources.limits
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 ```
 
 ### Disk Space Full
@@ -365,7 +365,7 @@ for app in /opt/hosting-blueprint/apps/*/; do
   if [ -f compose.yml ]; then
     echo "Updating $(basename $app)..."
     sudo docker compose pull
-    sudo docker compose up -d
+    sudo docker compose --compatibility up -d
   fi
 done
 ```
@@ -392,7 +392,7 @@ cd apps/my-app
 nano .env  # Update secrets
 
 # Restart app to load new secrets
-sudo docker compose up -d --force-recreate
+sudo docker compose --compatibility up -d --force-recreate
 ```
 
 ### Clean Up Old Images
@@ -487,7 +487,7 @@ sudo docker compose down
 sudo tar -czf /tmp/my-app-backup-$(date +%Y%m%d).tar.gz ./data
 
 # Restart app
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 
 # Move backup off-server
 scp /tmp/my-app-backup-*.tar.gz backup-server:/backups/
@@ -517,7 +517,7 @@ sudo docker compose down
 sudo tar -xzf /tmp/my-app-backup-20241201.tar.gz -C ./
 
 # Start app
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 ```
 
 ---
@@ -583,7 +583,7 @@ sudo docker compose restart caddy  # Caddy auto-renews
 3. **Check apps:**
    ```bash
    sudo docker ps -a
-   sudo docker compose up -d  # In each app directory
+   sudo docker compose --compatibility up -d  # In each app directory
    ```
 
 ### Rollback All Apps
@@ -598,7 +598,7 @@ for app in /opt/hosting-blueprint/apps/*/; do
     echo "Rolling back $(basename $app)..."
     # Pull previous tag or use git to checkout previous version
     sudo docker compose down
-    sudo docker compose up -d
+    sudo docker compose --compatibility up -d
   fi
 done
 EOF
@@ -680,7 +680,7 @@ cd apps/production-app
 nano .env  # Change to ENVIRONMENT=production, DOCKER_NETWORK=prod-web
 
 # Deploy
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 
 # Add to Caddy (production block)
 # Restart Caddy
@@ -693,7 +693,7 @@ After upgrading VM (more CPU/RAM):
 ```bash
 # Update resource limits in compose files
 # Restart containers to apply new limits
-sudo docker compose up -d --force-recreate
+sudo docker compose --compatibility up -d --force-recreate
 ```
 
 ---

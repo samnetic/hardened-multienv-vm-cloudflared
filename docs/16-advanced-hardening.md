@@ -23,7 +23,7 @@ WAF and abuse controls:
 - Enable **Bot Fight Mode** (and AI bot blocking if available to you).
 
 Defense-in-depth for Next.js:
-- Strip internal middleware headers at the edge (Cloudflare Transform Rules) and/or at Caddy (this blueprint already strips common `x-middleware-*` headers in `infra/reverse-proxy/Caddyfile`).
+- Strip internal middleware headers at the edge (Cloudflare Transform Rules) and/or at Caddy (this blueprint already strips common `x-middleware-*` headers in `/srv/infrastructure/reverse-proxy/Caddyfile`).
 
 ## Cloudflare Access (SSO + Service Tokens)
 

@@ -202,7 +202,7 @@ Enabled automatically for all traffic.
 
 **Check:**
 1. Tunnel running: `sudo systemctl status cloudflared`
-2. Caddy running: `sudo docker compose ps` (in infra/reverse-proxy)
+2. Caddy running: `sudo docker compose ps` (in /srv/infrastructure/reverse-proxy)
 3. App running: `sudo docker ps`
 4. Tunnel logs: `sudo journalctl -u cloudflared -f`
 
