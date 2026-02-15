@@ -110,17 +110,51 @@ if ! confirm "Continue?" "y"; then
 fi
 
 print_header "Step 1/3: Install Packages"
-print_step "Updating apt metadata..."
-wait_for_apt
-env DEBIAN_FRONTEND=noninteractive APT_LISTCHANGES_FRONTEND=none apt-get update
 
-print_step "Installing sops + age..."
-wait_for_apt
-env DEBIAN_FRONTEND=noninteractive APT_LISTCHANGES_FRONTEND=none apt-get install -y \
-  -o Dpkg::Options::=--force-confdef \
-  -o Dpkg::Options::=--force-confold \
-  sops age
-print_success "Installed packages"
+# --- age (available via apt on Ubuntu 22.04+) ---
+if command -v age >/dev/null 2>&1; then
+  print_success "age is already installed ($(age --version 2>/dev/null || echo 'unknown'))"
+else
+  print_step "Installing age via apt..."
+  wait_for_apt
+  env DEBIAN_FRONTEND=noninteractive APT_LISTCHANGES_FRONTEND=none apt-get update
+  wait_for_apt
+  env DEBIAN_FRONTEND=noninteractive APT_LISTCHANGES_FRONTEND=none apt-get install -y \
+    -o Dpkg::Options::=--force-confdef \
+    -o Dpkg::Options::=--force-confold \
+    age
+  print_success "age installed"
+fi
+
+# --- sops (not in Ubuntu repos; install from GitHub releases) ---
+if command -v sops >/dev/null 2>&1; then
+  print_success "sops is already installed ($(sops --version 2>/dev/null | head -1 || echo 'unknown'))"
+else
+  print_step "Installing sops from GitHub releases..."
+  ARCH="$(dpkg --print-architecture)"
+  # Map dpkg arch to sops binary naming
+  case "$ARCH" in
+    amd64) SOPS_ARCH="amd64" ;;
+    arm64) SOPS_ARCH="arm64" ;;
+    *)
+      print_error "Unsupported architecture for sops: $ARCH"
+      print_info "Install sops manually: https://github.com/getsops/sops/releases"
+      exit 1
+      ;;
+  esac
+
+  SOPS_VERSION="$(curl -fsSL https://api.github.com/repos/getsops/sops/releases/latest | grep '"tag_name"' | cut -d'"' -f4)"
+  if [ -z "$SOPS_VERSION" ]; then
+    print_error "Could not determine latest sops version from GitHub API"
+    exit 1
+  fi
+  SOPS_URL="https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.${SOPS_ARCH}"
+
+  print_info "Downloading sops ${SOPS_VERSION} for ${SOPS_ARCH}..."
+  curl -fsSL -o /usr/local/bin/sops "$SOPS_URL"
+  chmod 755 /usr/local/bin/sops
+  print_success "sops ${SOPS_VERSION} installed to /usr/local/bin/sops"
+fi
 
 print_header "Step 2/3: Create Directories"
 
