@@ -553,7 +553,12 @@ else
 
   # Create system secrets directory (not in git)
   print_step "Creating system secrets directories..."
-  mkdir -p /var/secrets/{dev,staging,production}
+  SETUP_PROFILE="${SETUP_PROFILE:-full-stack}"
+  if [ "$SETUP_PROFILE" = "full-stack" ]; then
+    mkdir -p /var/secrets/{dev,staging,production}
+  else
+    mkdir -p /var/secrets/production
+  fi
   chown -R root:"$SECRETS_GROUP" /var/secrets
   chmod 750 /var/secrets
   find /var/secrets -type d -exec chmod 750 {} \;
@@ -1101,13 +1106,23 @@ EOF
 	  docker --version
 	  docker compose version
 
-  # Create deployment directories
-  print_step "Creating deployment directories..."
-  mkdir -p /srv/apps/{dev,staging,production}
-  chown -R "$SYSADMIN_USER:$SYSADMIN_USER" /srv/apps
-  chmod 755 /srv/apps
-  chmod 755 /srv/apps/{dev,staging,production}
-  print_success "Deployment directories created at /srv/apps/"
+  # Create deployment directories based on server profile
+  SETUP_PROFILE="${SETUP_PROFILE:-full-stack}"
+  print_step "Creating deployment directories (profile: ${SETUP_PROFILE})..."
+
+  if [ "$SETUP_PROFILE" = "full-stack" ]; then
+    mkdir -p /srv/apps/{dev,staging,production}
+    chown -R "$SYSADMIN_USER:$SYSADMIN_USER" /srv/apps
+    chmod 755 /srv/apps
+    chmod 755 /srv/apps/{dev,staging,production}
+    print_success "App directories created at /srv/apps/{dev,staging,production}"
+  else
+    # For monitoring/minimal profiles, create a services directory
+    mkdir -p /srv/services
+    chown -R "$SYSADMIN_USER:$SYSADMIN_USER" /srv/services
+    chmod 755 /srv/services
+    print_success "Services directory created at /srv/services/"
+  fi
 
   # Install systemd service for auto-starting Docker Compose apps
   print_step "Installing Docker Compose auto-start service..."

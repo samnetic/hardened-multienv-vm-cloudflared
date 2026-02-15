@@ -10,14 +10,14 @@
 
 ## ✨ Features
 
-- 🚫 **Zero Open Ports** - All access via Cloudflare Tunnel (SSH, HTTP/HTTPS)
-- 🔐 **Enterprise Security** - Kernel hardening, SSH hardening, fail2ban, auditd
-- 🐳 **Docker-First** - Secure defaults, resource limits, file-based secrets
-- 🌐 **Free SSL** - Automatic wildcard certificates (`*.yourdomain.com`)
-- 🔄 **GitOps Ready** - Feature branches → DEV, main → STAGING, tags → PROD
-- 📊 **Three Environments** - Isolated dev, staging, production with separate networks
-- 🤖 **AI Agent Ready** - Secure hosting for LLM agents with resource controls
-- ⚡ **Fast Setup** - One command from fresh VM to production-ready
+- **Zero Open Ports** - All access via Cloudflare Tunnel (SSH, HTTP/HTTPS)
+- **Enterprise Security** - Kernel hardening, SSH hardening, fail2ban, auditd
+- **Docker-First** - Secure defaults, resource limits, file-based secrets
+- **Free SSL** - Automatic wildcard certificates (`*.yourdomain.com`)
+- **Flexible Profiles** - Full Stack, Monitoring, or Minimal server setup
+- **Easy Subdomain Routing** - Add `grafana.yourdomain.com` with one command
+- **GitOps Ready** - Feature branches → DEV, main → STAGING, tags → PROD (full-stack)
+- **Fast Setup** - One command from fresh VM to production-ready
 
 ---
 
@@ -51,7 +51,11 @@ That's it! The script will:
 
 **Interactive Setup:** You'll be prompted for:
 
-- Domain name (e.g., `yourdomain.com`)
+- Domain name with confirmation (e.g., `yourdomain.com` or `monitoring.yourdomain.com`)
+- Server profile:
+  - **Full Stack** - Multi-environment (dev/staging/prod) app hosting
+  - **Monitoring** - Prometheus, Grafana, alerting (no app environments)
+  - **Minimal** - Just hardening + tunnel (add services later)
 - SSH public keys (paste from your local machine)
 - Sysadmin sudo mode (password required recommended vs passwordless)
 - Timezone (defaults to UTC)

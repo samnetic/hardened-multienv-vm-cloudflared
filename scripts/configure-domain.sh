@@ -21,6 +21,9 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 
+# Server profile (inherited from setup.sh or set via env var)
+SETUP_PROFILE="${SETUP_PROFILE:-full-stack}"
+
 # Arguments
 DOMAIN="${1:-}"
 
@@ -30,13 +33,14 @@ if [ -z "$DOMAIN" ]; then
   echo "Examples:"
   echo "  $0 yourdomain.com"
   echo "  $0 yourdomain.com --hostname prod-server"
+  echo "  $0 monitoring.yourdomain.com --hostname monitoring"
   exit 1
 fi
 
 # Validate domain format (requires at least one dot, no consecutive dots/hyphens)
 if [[ ! "$DOMAIN" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$ ]]; then
   echo -e "${RED}Error: Invalid domain format '${DOMAIN}'${NC}"
-  echo "Domain must be a valid format like 'yourdomain.com' or 'sub.yourdomain.com'"
+  echo "Domain must be a valid format like 'yourdomain.com' or 'monitoring.yourdomain.com'"
   echo "  - Must contain at least one dot"
   echo "  - Can only contain letters, numbers, dots, and hyphens"
   echo "  - Cannot start or end with a hyphen or dot"
@@ -175,14 +179,32 @@ fi
 # Summary
 # =================================================================
 echo ""
-echo -e "${GREEN}Domain configured!${NC}"
+echo -e "${GREEN}Domain configured! (profile: ${SETUP_PROFILE})${NC}"
 echo ""
-echo "Your subdomains:"
-echo "  • app.${DOMAIN}           → Production app"
-echo "  • staging-app.${DOMAIN}   → Staging app"
-echo "  • dev-app.${DOMAIN}       → Dev app"
-echo "  • monitoring.${DOMAIN}    → Netdata (if enabled)"
-echo "  • ssh.${DOMAIN}           → SSH via tunnel"
+
+if [ "$SETUP_PROFILE" = "full-stack" ]; then
+  echo "Your subdomains:"
+  echo "  • app.${DOMAIN}           → Production app"
+  echo "  • staging-app.${DOMAIN}   → Staging app"
+  echo "  • dev-app.${DOMAIN}       → Dev app"
+  echo "  • monitoring.${DOMAIN}    → Netdata (if enabled)"
+  echo "  • ssh.${DOMAIN}           → SSH via tunnel"
+elif [ "$SETUP_PROFILE" = "monitoring" ]; then
+  echo "Your domain:"
+  echo "  • ${DOMAIN}               → Main monitoring page"
+  echo "  • ssh.${DOMAIN}           → SSH via tunnel"
+  echo ""
+  echo "Add subdomain routes with:"
+  echo "  sudo /opt/hosting-blueprint/scripts/add-subdomain.sh"
+else
+  echo "Your domain:"
+  echo "  • ${DOMAIN}               → Main page"
+  echo "  • ssh.${DOMAIN}           → SSH via tunnel"
+  echo ""
+  echo "Add subdomain routes with:"
+  echo "  sudo /opt/hosting-blueprint/scripts/add-subdomain.sh"
+fi
+
 echo ""
 echo "Next steps:"
 echo "  1. Add DNS records in Cloudflare (CNAME to tunnel)"

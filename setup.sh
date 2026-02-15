@@ -110,7 +110,7 @@ validate_domain() {
   fi
 
   # Labels: start/end alnum, allow hyphens in middle.
-  if [[ ! "$d" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]]; then
+  if [[ ! "$d" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]]; then
     return 1
   fi
 
@@ -341,10 +341,11 @@ collect_config() {
     print_info "Completed steps: $completed/5"
     echo ""
     print_info "Current configuration:"
-    echo "  Domain:     ${DOMAIN:-not set}"
-    echo "  Timezone:   ${TIMEZONE:-not set}"
+    echo "  Domain:       ${DOMAIN:-not set}"
+    echo "  Profile:      ${SETUP_PROFILE:-full-stack}"
+    echo "  Timezone:     ${TIMEZONE:-not set}"
     echo "  Sysadmin sudo: ${SYSADMIN_SUDO_MODE:-not set}"
-    echo "  Cloudflared: ${SETUP_CLOUDFLARED:-not set}"
+    echo "  Cloudflared:  ${SETUP_CLOUDFLARED:-not set}"
     echo ""
     if confirm "Use this configuration and continue?" "y"; then
       print_success "Resuming with saved configuration"
@@ -374,10 +375,60 @@ collect_config() {
   DOMAIN="$(echo "$DOMAIN" | xargs | tr '[:upper:]' '[:lower:]')"
   while ! validate_domain "$DOMAIN"; do
     print_error "Invalid domain: '$DOMAIN'"
-    print_info "Enter a base domain like: example.com (no http://, no paths)"
+    print_info "Enter a domain like: example.com or monitoring.example.com (no http://, no paths)"
     read -rp "Domain: " DOMAIN
     DOMAIN="$(echo "$DOMAIN" | xargs | tr '[:upper:]' '[:lower:]')"
   done
+
+  # Domain confirmation (double-check to avoid typos)
+  echo ""
+  echo -e "${YELLOW}Please re-enter your domain to confirm (typos here are costly!):${NC}"
+  read -rp "Confirm domain: " DOMAIN_CONFIRM
+  DOMAIN_CONFIRM="$(echo "$DOMAIN_CONFIRM" | xargs | tr '[:upper:]' '[:lower:]')"
+  while [ "$DOMAIN_CONFIRM" != "$DOMAIN" ]; do
+    print_error "Domains don't match!"
+    echo "  You entered:     $DOMAIN"
+    echo "  Confirmation:    $DOMAIN_CONFIRM"
+    echo ""
+    echo "Enter the domain name again:"
+    read -rp "Domain: " DOMAIN
+    DOMAIN="$(echo "$DOMAIN" | xargs | tr '[:upper:]' '[:lower:]')"
+    while ! validate_domain "$DOMAIN"; do
+      print_error "Invalid domain: '$DOMAIN'"
+      read -rp "Domain: " DOMAIN
+      DOMAIN="$(echo "$DOMAIN" | xargs | tr '[:upper:]' '[:lower:]')"
+    done
+    echo ""
+    read -rp "Confirm domain: " DOMAIN_CONFIRM
+    DOMAIN_CONFIRM="$(echo "$DOMAIN_CONFIRM" | xargs | tr '[:upper:]' '[:lower:]')"
+  done
+  print_success "Domain confirmed: $DOMAIN"
+
+  # Server Profile
+  echo ""
+  echo "What type of server are you setting up?"
+  echo ""
+  echo "  1) Full Stack  - Multi-environment (dev/staging/prod) with app deployment"
+  echo "                   Creates isolated networks and directories for each environment."
+  echo ""
+  echo "  2) Monitoring  - Prometheus, Grafana, alerting server"
+  echo "                   No app environments. Monitors other servers."
+  echo ""
+  echo "  3) Minimal     - Just hardening + Cloudflare Tunnel"
+  echo "                   Add services manually later. Good for single-purpose servers."
+  echo ""
+  read -rp "Server profile [1]: " profile_choice
+  profile_choice="${profile_choice:-1}"
+  case "$profile_choice" in
+    1) SETUP_PROFILE="full-stack" ;;
+    2) SETUP_PROFILE="monitoring" ;;
+    3) SETUP_PROFILE="minimal" ;;
+    *)
+      print_error "Invalid choice: $profile_choice"
+      exit 1
+      ;;
+  esac
+  print_success "Server profile: $SETUP_PROFILE"
 
   # SSH Public Key
   echo ""
@@ -494,6 +545,7 @@ collect_config() {
     fi
   fi
   echo "  Domain:            $DOMAIN"
+  echo "  Server profile:    $SETUP_PROFILE"
   echo "  Sysadmin SSH Key:  ${SYSADMIN_SSH_KEY:0:40}..."
   echo "  Appmgr SSH Key:    $appmgr_key_summary"
   echo "  Timezone:          $TIMEZONE"
@@ -511,6 +563,7 @@ collect_config() {
   cat > "$CONFIG_FILE" << EOF
 # VM Configuration - Generated $(date)
 DOMAIN="$DOMAIN"
+SETUP_PROFILE="$SETUP_PROFILE"
 TIMEZONE="$TIMEZONE"
 SETUP_CLOUDFLARED="$SETUP_CLOUDFLARED"
 SYSADMIN_SUDO_MODE="$SYSADMIN_SUDO_MODE"
@@ -521,6 +574,222 @@ EOF
 
   chmod 600 "$CONFIG_FILE"
   print_success "Configuration saved to $CONFIG_FILE"
+}
+
+# =================================================================
+# Profile-Aware Configuration Generators
+# =================================================================
+
+generate_minimal_caddyfile() {
+  local domain="$1"
+  local profile="$2"
+  local output_file="$3"
+
+  cat > "$output_file" << CADDYEOF
+# =================================================================
+# Caddyfile - HTTP Reverse Proxy for Cloudflare Tunnel
+# =================================================================
+# Profile: ${profile}
+# Domain: ${domain}
+# Generated: $(date)
+#
+# Add new subdomain routes with:
+#   sudo /opt/hosting-blueprint/scripts/add-subdomain.sh
+# =================================================================
+
+# Global Options
+{
+  auto_https off
+  admin off
+}
+
+# =================================================================
+# Reusable Snippets
+# =================================================================
+
+(security_headers) {
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Frame-Options "DENY"
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    Permissions-Policy "geolocation=(), microphone=(), camera=()"
+    -Server
+  }
+}
+
+(proxy_headers) {
+  header_up X-Real-IP {http.request.header.CF-Connecting-IP}
+  header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+  header_up X-Forwarded-Proto https
+  header_up X-Forwarded-Host {host}
+  header_up -x-middleware-subrequest
+  header_up -x-middleware-invoke
+  header_up -x-middleware-next
+  header_up -x-invoke-path
+  header_up -x-invoke-query
+  header_up -x-invoke-output
+  header_up -x-invoke-status
+}
+
+(tunnel_only) {
+  @not_tunnel not remote_ip 127.0.0.1 ::1 10.250.0.1
+  respond @not_tunnel 403
+}
+
+# =================================================================
+# BASE DOMAIN
+# =================================================================
+
+http://${domain} {
+  import tunnel_only
+  import security_headers
+  respond "Server is running on ${domain}" 200
+}
+
+CADDYEOF
+
+  # Add profile-specific commented blocks
+  if [ "$profile" = "monitoring" ]; then
+    # Extract parent domain for subdomain suggestions
+    # e.g., monitoring.example.com -> example.com
+    local parent_domain="$domain"
+    if [[ "$domain" == *.*.* ]]; then
+      parent_domain="${domain#*.}"
+    fi
+
+    cat >> "$output_file" << CADDYEOF
+# =================================================================
+# MONITORING SERVICES
+# =================================================================
+# Add routes as you deploy services. Use the add-subdomain script:
+#   sudo /opt/hosting-blueprint/scripts/add-subdomain.sh
+#
+# Or uncomment and edit the blocks below:
+# =================================================================
+
+# Grafana - Dashboards & Visualization
+# http://grafana.${parent_domain} {
+#   import tunnel_only
+#   import security_headers
+#   reverse_proxy grafana:3000 {
+#     import proxy_headers
+#   }
+# }
+
+# Prometheus - Metrics & Alerting
+# http://prometheus.${parent_domain} {
+#   import tunnel_only
+#   import security_headers
+#   reverse_proxy prometheus:9090 {
+#     import proxy_headers
+#   }
+# }
+
+# Alertmanager
+# http://alertmanager.${parent_domain} {
+#   import tunnel_only
+#   import security_headers
+#   reverse_proxy alertmanager:9093 {
+#     import proxy_headers
+#   }
+# }
+
+CADDYEOF
+  fi
+
+  # Always add wildcard catch-all at the end
+  cat >> "$output_file" << CADDYEOF
+# =================================================================
+# WILDCARD CATCH-ALL (404 for unconfigured subdomains)
+# =================================================================
+
+http://*.${domain} {
+  import tunnel_only
+  import security_headers
+  respond "This subdomain is not configured yet" 404
+}
+CADDYEOF
+
+  chmod 644 "$output_file"
+}
+
+generate_minimal_compose() {
+  local profile="$1"
+  local output_file="$2"
+
+  cat > "$output_file" << 'COMPOSEEOF'
+# =================================================================
+# Caddy Reverse Proxy - Docker Compose Configuration
+# =================================================================
+# Cloudflare Tunnel handles HTTPS; Caddy runs HTTP only
+# =================================================================
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp:size=64M,mode=1777
+
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+          pids: 100
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    environment:
+      - DOMAIN=${DOMAIN:-yourdomain.com}
+
+    ports:
+      - "127.0.0.1:80:80"
+
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+    networks:
+      - caddy-origin
+      - monitoring
+
+volumes:
+  caddy_data:
+    name: caddy_data
+  caddy_config:
+    name: caddy_config
+
+networks:
+  caddy-origin:
+    external: true
+    name: hosting-caddy-origin
+  monitoring:
+    external: true
+COMPOSEEOF
+
+  chmod 644 "$output_file"
 }
 
 # =================================================================
@@ -535,6 +804,7 @@ run_setup() {
 
   # Export variables for scripts
   export DOMAIN
+  export SETUP_PROFILE="${SETUP_PROFILE:-full-stack}"
   export TIMEZONE
   export SYSADMIN_SSH_KEY
   export APPMGR_SSH_KEY
@@ -607,6 +877,16 @@ run_setup() {
       print_warning "create-networks.sh not found, skipping"
       mark_step_completed "docker_networks"
     fi
+  fi
+
+  # Step 3.5: Generate profile-aware Caddyfile and compose for reverse proxy
+  local INFRA_CADDY="/srv/infrastructure/reverse-proxy"
+  if [ -d "$INFRA_CADDY" ] && [ "$SETUP_PROFILE" != "full-stack" ]; then
+    print_step "Generating ${SETUP_PROFILE} Caddyfile and compose.yml..."
+    generate_minimal_caddyfile "$DOMAIN" "$SETUP_PROFILE" "${INFRA_CADDY}/Caddyfile"
+    generate_minimal_compose "$SETUP_PROFILE" "${INFRA_CADDY}/compose.yml"
+    chown -R sysadmin:sysadmin "$INFRA_CADDY" 2>/dev/null || true
+    print_success "Generated ${SETUP_PROFILE} reverse proxy configuration"
   fi
 
   # Step 4: Cloudflared (optional)
@@ -793,35 +1073,46 @@ print_next_steps() {
     echo ""
   fi
 
-  echo "3. ${BOLD}Create Your First App${NC}"
-  echo "   sudo mkdir -p /srv/apps/staging"
-  echo "   sudo cp -r /opt/hosting-blueprint/apps/_template /srv/apps/staging/myapp"
-  echo "   cd /srv/apps/staging/myapp"
-  echo "   # Edit compose.yml and .env"
-  echo "   sudo docker compose --compatibility up -d"
-  echo ""
+  if [ "${SETUP_PROFILE:-full-stack}" = "full-stack" ]; then
+    echo "3. ${BOLD}Create Your First App${NC}"
+    echo "   sudo mkdir -p /srv/apps/staging"
+    echo "   sudo cp -r /opt/hosting-blueprint/apps/_template /srv/apps/staging/myapp"
+    echo "   cd /srv/apps/staging/myapp"
+    echo "   # Edit compose.yml and .env"
+    echo "   sudo docker compose --compatibility up -d"
+    echo ""
 
-  echo "4. ${BOLD}Create Secrets${NC}"
-  echo "   ./scripts/secrets/create-secret.sh dev db_password"
-  echo "   ./scripts/secrets/create-secret.sh staging db_password"
-  echo "   ./scripts/secrets/create-secret.sh production db_password"
-  echo ""
+    echo "4. ${BOLD}Create Secrets${NC}"
+    echo "   ./scripts/secrets/create-secret.sh dev db_password"
+    echo "   ./scripts/secrets/create-secret.sh staging db_password"
+    echo "   ./scripts/secrets/create-secret.sh production db_password"
+    echo ""
+  elif [ "${SETUP_PROFILE:-full-stack}" = "monitoring" ]; then
+    echo "3. ${BOLD}Deploy Monitoring Stack${NC}"
+    echo "   cd /srv/services/monitoring"
+    echo "   # Edit .env (set GRAFANA_DOMAIN, etc.)"
+    echo "   sudo docker compose --compatibility up -d"
+    echo ""
 
-  echo "5. ${BOLD}Set Up GitHub Actions${NC}"
-  echo "   - Fork this repo to your GitHub account"
-  echo "   - Add secrets in Settings > Secrets and variables > Actions:"
-  echo "     - SSH_PRIVATE_KEY"
-  echo "     - SSH_HOST (ssh.${DOMAIN})"
-  echo "     - SSH_USER (appmgr)"
-  echo "     - SSH_KNOWN_HOSTS (pin host key; generate via ./scripts/ssh/print-known-hosts.sh ssh.${DOMAIN})"
-  echo "     - CF_SERVICE_TOKEN_ID"
-  echo "     - CF_SERVICE_TOKEN_SECRET"
-  echo ""
+    echo "4. ${BOLD}Add Subdomain Routes${NC}"
+    echo "   sudo /opt/hosting-blueprint/scripts/add-subdomain.sh"
+    echo "   # Example: route grafana.yourdomain.com to grafana:3000"
+    echo ""
+  else
+    echo "3. ${BOLD}Add Services${NC}"
+    echo "   Place compose files in /srv/services/<name>/"
+    echo "   sudo docker compose --compatibility up -d"
+    echo ""
 
-  echo "6. ${BOLD}Protect Admin Panels (Zero Trust)${NC}"
+    echo "4. ${BOLD}Add Subdomain Routes${NC}"
+    echo "   sudo /opt/hosting-blueprint/scripts/add-subdomain.sh"
+    echo "   # Routes a subdomain to a container through the reverse proxy"
+    echo ""
+  fi
+
+  echo "5. ${BOLD}Protect Admin Panels (Zero Trust)${NC}"
   echo "   - Go to Cloudflare Zero Trust dashboard"
   echo "   - Access > Applications > Add self-hosted app"
-  echo "   - Create policies for: monitoring.${DOMAIN}, admin panels"
   echo "   - See docs/14-cloudflare-zero-trust.md for full guide"
   echo ""
 
@@ -830,14 +1121,11 @@ print_next_steps() {
   echo "  # System status"
   echo "  ./scripts/monitoring/status.sh"
   echo ""
+  echo "  # Add a new subdomain route"
+  echo "  sudo /opt/hosting-blueprint/scripts/add-subdomain.sh"
+  echo ""
   echo "  # View logs"
   echo "  ./scripts/monitoring/logs.sh"
-  echo ""
-  echo "  # Disk usage"
-  echo "  ./scripts/monitoring/disk-usage.sh"
-  echo ""
-  echo "  # List secrets"
-  echo "  ./scripts/secrets/list-secrets.sh"
   echo ""
 
   echo -e "${CYAN}Documentation:${NC}"
@@ -946,9 +1234,13 @@ main() {
   echo "This script will set up a production-ready, hardened Ubuntu server with:"
   echo "  • Security hardening (SSH, firewall, fail2ban, kernel)"
   echo "  • Docker with secure defaults"
-  echo "  • Three environments (dev, staging, production)"
   echo "  • Cloudflare Tunnel for zero exposed ports"
   echo "  • Automated maintenance and updates"
+  echo ""
+  echo "You'll choose a server profile:"
+  echo "  • Full Stack  - Multi-environment (dev/staging/prod) app hosting"
+  echo "  • Monitoring  - Prometheus, Grafana, alerting (no app environments)"
+  echo "  • Minimal     - Just hardening + tunnel (add services later)"
   echo ""
 
   if [ -n "$resuming_msg" ]; then

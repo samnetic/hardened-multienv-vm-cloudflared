@@ -179,6 +179,7 @@ load_config() {
     set +u
     source "$CONFIG_FILE"
     set -u
+    SETUP_PROFILE="${SETUP_PROFILE:-full-stack}"
   else
     print_error "Configuration file not found: $CONFIG_FILE"
     print_info "Please run ./setup.sh first"
@@ -219,7 +220,11 @@ init_infrastructure() {
   echo ""
   echo -e "${CYAN}What will be created:${NC}"
   echo "  /srv/infrastructure/    - Reverse proxy, monitoring (git tracked)"
-  echo "  /srv/apps/              - Your applications (dev/staging/prod)"
+  if [ "$SETUP_PROFILE" = "full-stack" ]; then
+    echo "  /srv/apps/              - Your applications (dev/staging/prod)"
+  else
+    echo "  /srv/services/          - Your services"
+  fi
   echo "  /srv/static/            - Static files (images, assets)"
   echo "  /var/secrets/           - Secrets (NOT in git)"
   echo ""
@@ -239,7 +244,11 @@ init_infrastructure() {
 
     # Base directories
     $SUDO mkdir -p "$infra_root" /srv/static
-    $SUDO mkdir -p /var/secrets/{dev,staging,production}
+    if [ "$SETUP_PROFILE" = "full-stack" ]; then
+      $SUDO mkdir -p /var/secrets/{dev,staging,production}
+    else
+      $SUDO mkdir -p /var/secrets/production
+    fi
 
     # Permissions
     $SUDO chown -R sysadmin:sysadmin "$infra_root" /srv/static 2>/dev/null || true
@@ -1067,11 +1076,29 @@ main() {
     fi
   fi
 
-  # Run wizard steps
+  # Run wizard steps based on server profile
   welcome
-  init_infrastructure
-  choose_first_app
-  setup_monitoring
+
+  if [ "$SETUP_PROFILE" = "full-stack" ]; then
+    init_infrastructure
+    choose_first_app
+    setup_monitoring
+  elif [ "$SETUP_PROFILE" = "monitoring" ]; then
+    init_infrastructure
+    echo ""
+    print_info "Server profile: monitoring"
+    print_info "Skipping app deployment (no environments configured)."
+    echo ""
+    setup_monitoring
+  else
+    init_infrastructure
+    echo ""
+    print_info "Server profile: minimal"
+    print_info "Add services manually or use: sudo /opt/hosting-blueprint/scripts/add-subdomain.sh"
+    echo ""
+    pause
+  fi
+
   show_completion
 }
 

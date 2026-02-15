@@ -12,6 +12,14 @@
 
 set -euo pipefail
 
+# =================================================================
+# Configuration
+# =================================================================
+
+# Server profile: full-stack | monitoring | minimal
+# Inherited from setup.sh or set via environment variable.
+SETUP_PROFILE="${SETUP_PROFILE:-full-stack}"
+
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -21,7 +29,7 @@ NC='\033[0m'
 
 echo ""
 echo -e "${BLUE}======================================================================${NC}"
-echo -e "${BLUE} Creating Docker Networks for Multi-Environment Setup${NC}"
+echo -e "${BLUE} Creating Docker Networks (profile: ${SETUP_PROFILE})${NC}"
 echo -e "${BLUE}======================================================================${NC}"
 echo ""
 
@@ -96,36 +104,36 @@ create_network() {
 FAILURES=0
 
 # =================================================================
-# Development Environment Networks
-# =================================================================
-echo "Development networks (accessible from host):"
-create_network "dev-web" "bridge" "apps accessible via Caddy" || ((FAILURES++))
-create_network "dev-backend" "bridge" "databases accessible from host for local dev" || ((FAILURES++))
-echo ""
-
-# =================================================================
-# Staging Environment Networks
-# =================================================================
-echo "Staging networks (internal backend):"
-create_network "staging-web" "bridge" "apps accessible via Caddy" || ((FAILURES++))
-create_network "staging-backend" "internal" "databases internal only" || ((FAILURES++))
-echo ""
-
-# =================================================================
-# Production Environment Networks
-# =================================================================
-echo "Production networks (most secure):"
-create_network "prod-web" "bridge" "apps accessible via Caddy" || ((FAILURES++))
-create_network "prod-backend" "internal" "databases internal only" || ((FAILURES++))
-echo ""
-
-# =================================================================
-# Shared Networks
+# Shared Networks (always created)
 # =================================================================
 echo "Shared networks:"
-create_network "monitoring" "bridge" "optional monitoring stack" || ((FAILURES++))
+create_network "monitoring" "bridge" "monitoring stack" || ((FAILURES++))
 create_network "hosting-caddy-origin" "internal" "reverse proxy origin enforcement (tunnel-only)" || ((FAILURES++))
 echo ""
+
+# =================================================================
+# Environment Networks (full-stack profile only)
+# =================================================================
+if [ "$SETUP_PROFILE" = "full-stack" ]; then
+  echo "Development networks (accessible from host):"
+  create_network "dev-web" "bridge" "apps accessible via Caddy" || ((FAILURES++))
+  create_network "dev-backend" "bridge" "databases accessible from host for local dev" || ((FAILURES++))
+  echo ""
+
+  echo "Staging networks (internal backend):"
+  create_network "staging-web" "bridge" "apps accessible via Caddy" || ((FAILURES++))
+  create_network "staging-backend" "internal" "databases internal only" || ((FAILURES++))
+  echo ""
+
+  echo "Production networks (most secure):"
+  create_network "prod-web" "bridge" "apps accessible via Caddy" || ((FAILURES++))
+  create_network "prod-backend" "internal" "databases internal only" || ((FAILURES++))
+  echo ""
+else
+  echo -e "${BLUE}ℹ  Skipping environment networks (profile: ${SETUP_PROFILE})${NC}"
+  echo "  Use 'full-stack' profile for dev/staging/prod networks."
+  echo ""
+fi
 
 # Check for failures
 if [ "$FAILURES" -gt 0 ]; then
@@ -138,31 +146,33 @@ fi
 # =================================================================
 
 echo -e "${BLUE}======================================================================${NC}"
-echo -e "${BLUE} Network Creation Complete!${NC}"
+echo -e "${BLUE} Network Creation Complete! (profile: ${SETUP_PROFILE})${NC}"
 echo -e "${BLUE}======================================================================${NC}"
 echo ""
 echo "Created networks:"
 "${DOCKER[@]}" network ls --format "  {{.Name}}" | grep -E "dev-|staging-|prod-|monitoring|hosting-caddy-origin" || echo "  (none found)"
 echo ""
-echo "Environment Overview:"
-echo ""
-echo "  DEV (playground - local PC can connect to DBs):"
-echo "    • dev-web      - Web-facing containers"
-echo "    • dev-backend  - Backend services (NOT internal, accessible)"
-echo ""
-echo "  STAGING (production-like - auto-deploy, no local access):"
-echo "    • staging-web      - Web-facing containers"
-echo "    • staging-backend  - Backend services (internal only)"
-echo ""
-echo "  PRODUCTION (most secure - manual deploy only):"
-echo "    • prod-web      - Web-facing containers"
-echo "    • prod-backend  - Backend services (internal only)"
-echo ""
+
+if [ "$SETUP_PROFILE" = "full-stack" ]; then
+  echo "Environment Overview:"
+  echo ""
+  echo "  DEV (playground - local PC can connect to DBs):"
+  echo "    • dev-web      - Web-facing containers"
+  echo "    • dev-backend  - Backend services (NOT internal, accessible)"
+  echo ""
+  echo "  STAGING (production-like - auto-deploy, no local access):"
+  echo "    • staging-web      - Web-facing containers"
+  echo "    • staging-backend  - Backend services (internal only)"
+  echo ""
+  echo "  PRODUCTION (most secure - manual deploy only):"
+  echo "    • prod-web      - Web-facing containers"
+  echo "    • prod-backend  - Backend services (internal only)"
+  echo ""
+fi
+
 echo "  SHARED:"
-echo "    • monitoring    - Optional Netdata monitoring"
-echo "    • hosting-caddy-origin - Reverse proxy origin enforcement network"
+echo "    • monitoring              - Monitoring stack (Prometheus, Grafana, etc.)"
+echo "    • hosting-caddy-origin    - Reverse proxy origin enforcement network"
 echo ""
 echo -e "${GREEN}✓ All networks ready!${NC}"
-echo ""
-echo "Next: Update Caddyfile to route to each environment"
 echo ""
