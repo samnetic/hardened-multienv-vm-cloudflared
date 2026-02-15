@@ -1017,12 +1017,12 @@ else
 
   print_step "Adding Docker repository..."
   mkdir -p /etc/apt/keyrings
+  rm -f /etc/apt/keyrings/docker.gpg
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 
-  # Verify Docker GPG key fingerprint (official fingerprint: 9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88)
-  # Note: Using case-insensitive grep and normalizing to uppercase for comparison
-  DOCKER_GPG_FINGERPRINT=$(gpg --show-keys --with-fingerprint /etc/apt/keyrings/docker.gpg 2>/dev/null | grep -oiP '([a-f0-9]{4}\\s*){10}' | tr -d ' ' | tr '[:lower:]' '[:upper:]' | head -1)
+  # Verify Docker GPG key fingerprint (official: 9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88)
   EXPECTED_FINGERPRINT="9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
+  DOCKER_GPG_FINGERPRINT="$(gpg --show-keys --with-colons /etc/apt/keyrings/docker.gpg 2>/dev/null | grep '^fpr' | head -1 | cut -d: -f10)"
   if [ "$DOCKER_GPG_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]; then
     print_error "Docker GPG key fingerprint mismatch!"
     print_error "Expected: $EXPECTED_FINGERPRINT"
