@@ -61,6 +61,12 @@ That's it! The script will:
 - Timezone (defaults to UTC)
 - Cloudflare Tunnel setup (yes/no)
 
+**If setup fails mid-way**, pull the latest fixes and resume:
+
+```bash
+cd /opt/hosting-blueprint && sudo git pull && sudo ./setup.sh --force
+```
+
 ---
 
 ## 📖 Documentation
