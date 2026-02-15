@@ -309,12 +309,19 @@ check_network() {
 }
 
 fix_repo_ownership() {
-  print_step "Fixing repository ownership..."
+  print_step "Ensuring blueprint permissions..."
 
-  # Fix ownership if this is a git repo and we know the original user
-  if [ -d "${SCRIPT_DIR}/.git" ] && [ -n "${ORIGINAL_USER:-}" ] && [ "$ORIGINAL_USER" != "root" ]; then
-    chown -R "${ORIGINAL_USER}:${ORIGINAL_USER}" "${SCRIPT_DIR}"
-    print_success "Repository ownership set to $ORIGINAL_USER"
+  # Security: keep the blueprint root-owned.
+  # Root will execute these scripts; do not make them writable by non-root.
+  #
+  # For local/dev checkouts (not under /opt/hosting-blueprint), we skip to avoid
+  # surprising ownership changes.
+  if [ -d "${SCRIPT_DIR}/.git" ] && [[ "${SCRIPT_DIR}" == "/opt/hosting-blueprint" ]]; then
+    chown -R root:root "${SCRIPT_DIR}" 2>/dev/null || true
+    chmod -R go-w "${SCRIPT_DIR}" 2>/dev/null || true
+    print_success "Blueprint secured at ${SCRIPT_DIR} (root-owned)"
+  else
+    print_info "Skipping blueprint permission hardening (not running from /opt/hosting-blueprint)"
   fi
 }
 
@@ -557,14 +564,14 @@ run_setup() {
     # This also avoids dirtying the upstream blueprint git checkout with domain-specific edits.
     INFRA_ROOT="/srv/infrastructure"
     if [ ! -d "$INFRA_ROOT" ]; then
-      print_step "Initializing ${INFRA_ROOT} from template..."
-      mkdir -p "$INFRA_ROOT"
-      if [ -d "${SCRIPT_DIR}/infra" ]; then
-        cp -r "${SCRIPT_DIR}/infra/"* "$INFRA_ROOT/"
-        # sysadmin owns infra by default (CI deploys apps via a restricted wrapper).
-        chown -R sysadmin:sysadmin "$INFRA_ROOT" 2>/dev/null || true
-        chmod 755 "$INFRA_ROOT" 2>/dev/null || true
-      else
+	      print_step "Initializing ${INFRA_ROOT} from template..."
+	      mkdir -p "$INFRA_ROOT"
+	      if [ -d "${SCRIPT_DIR}/infra" ]; then
+	        cp -a "${SCRIPT_DIR}/infra/." "$INFRA_ROOT/"
+	        # sysadmin owns infra by default (CI deploys apps via a restricted wrapper).
+	        chown -R sysadmin:sysadmin "$INFRA_ROOT" 2>/dev/null || true
+	        chmod 755 "$INFRA_ROOT" 2>/dev/null || true
+	      else
         print_warning "Template infra directory not found at ${SCRIPT_DIR}/infra (skipping copy)"
       fi
     fi
@@ -644,13 +651,13 @@ run_setup() {
 
     if [ ! -f "${INFRA_ROOT}/reverse-proxy/compose.yml" ]; then
       if [ -d "${SCRIPT_DIR}/infra/reverse-proxy" ]; then
-        print_step "Initializing ${INFRA_ROOT} from template..."
-        mkdir -p "$INFRA_ROOT"
-        cp -r "${SCRIPT_DIR}/infra/"* "$INFRA_ROOT/"
+	        print_step "Initializing ${INFRA_ROOT} from template..."
+	        mkdir -p "$INFRA_ROOT"
+	        cp -a "${SCRIPT_DIR}/infra/." "$INFRA_ROOT/"
 
-        # sysadmin owns infra by default (CI deploys apps via a restricted wrapper).
-        chown -R sysadmin:sysadmin "$INFRA_ROOT" 2>/dev/null || true
-        chmod 755 "$INFRA_ROOT" 2>/dev/null || true
+	        # sysadmin owns infra by default (CI deploys apps via a restricted wrapper).
+	        chown -R sysadmin:sysadmin "$INFRA_ROOT" 2>/dev/null || true
+	        chmod 755 "$INFRA_ROOT" 2>/dev/null || true
       else
         print_warning "Template infra directory not found at ${SCRIPT_DIR}/infra"
       fi
@@ -658,13 +665,13 @@ run_setup() {
 
     if [ -f "${INFRA_ROOT}/reverse-proxy/compose.yml" ]; then
       cd "${INFRA_ROOT}/reverse-proxy"
-      docker compose up -d
+      docker compose --compatibility up -d
       mark_step_completed "reverse_proxy"
       cd "$SCRIPT_DIR"
     elif [ -f "${SCRIPT_DIR}/infra/reverse-proxy/compose.yml" ]; then
       print_warning "Using template reverse proxy directory (consider initializing /srv/infrastructure)"
       cd "${SCRIPT_DIR}/infra/reverse-proxy"
-      docker compose up -d
+      docker compose --compatibility up -d
       mark_step_completed "reverse_proxy"
       cd "$SCRIPT_DIR"
     else
@@ -791,7 +798,7 @@ print_next_steps() {
   echo "   sudo cp -r /opt/hosting-blueprint/apps/_template /srv/apps/staging/myapp"
   echo "   cd /srv/apps/staging/myapp"
   echo "   # Edit compose.yml and .env"
-  echo "   sudo docker compose up -d"
+  echo "   sudo docker compose --compatibility up -d"
   echo ""
 
   echo "4. ${BOLD}Create Secrets${NC}"

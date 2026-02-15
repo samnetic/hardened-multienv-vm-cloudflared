@@ -205,7 +205,7 @@ main() {
     print_error "Please test SSH via tunnel before proceeding"
     echo ""
     echo "Setup instructions:"
-    echo "  curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.$DOMAIN sysadmin"
+    echo "  curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.$DOMAIN sysadmin"
     exit 1
   fi
 

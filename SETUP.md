@@ -276,7 +276,7 @@ sed -i 's/yourdomain.com/yourREALdomain.com/g' Caddyfile
 
 ```bash
 # Start Caddy
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 
 # Check status
 sudo docker compose ps
@@ -313,7 +313,7 @@ DOCKER_NETWORK=staging-web
 
 ```bash
 # Deploy app
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 
 # Check status
 sudo docker compose ps
@@ -370,8 +370,8 @@ curl https://staging-app.yourdomain.com
 Recommended (installs cloudflared + configures SSH for tunnel access):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com appmgr
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com appmgr
 ```
 
 Manual install (if you prefer):
@@ -405,7 +405,7 @@ To avoid typing that long ProxyCommand every time, configure SSH:
 
 Recommended shortcut (this blueprint's helper):
 ```bash
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
 
 # Default alias is the first label of your domain:
 ssh yourdomain
@@ -561,7 +561,7 @@ DOCKER_NETWORK=prod-web
 ### 6.2 Deploy
 
 ```bash
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 sudo docker compose ps
 ```
 
@@ -643,7 +643,7 @@ Update:
 ```bash
 sudo docker compose pull  # recommended (pre-built images)
 # For local-only builds (not recommended for GitOps/production): sudo docker compose build
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 ```
 
 ### 7.5 Add to Caddy

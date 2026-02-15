@@ -252,7 +252,7 @@ fi
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo "  1. Redeploy the application to pick up the new secret:"
-echo "     sudo docker compose -f apps/<your-app>/compose.yml up -d"
+echo "     sudo docker compose --compatibility -f apps/<your-app>/compose.yml up -d"
 echo ""
 echo "  2. Verify the application works with the new secret"
 echo ""

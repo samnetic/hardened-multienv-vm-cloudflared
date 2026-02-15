@@ -19,7 +19,7 @@ For the full end-to-end setup (Prometheus + Grafana + alerting on a monitoring V
 ```bash
 cd /srv/infrastructure/monitoring-agent
 cp .env.example .env
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 ```
 
 Note: the blueprint configures Docker to expose daemon metrics on `0.0.0.0:9323` (host), so the monitoring agent can proxy it without mounting `docker.sock`.
@@ -30,14 +30,13 @@ Optional: enable per-container metrics (cAdvisor):
 
 ```bash
 cd /srv/infrastructure/monitoring-agent
-sudo docker compose -f compose.yml -f compose.cadvisor.yml up -d
+sudo docker compose --compatibility -f compose.yml -f compose.cadvisor.yml up -d
 ```
 
 2. Expose scrape endpoints via Caddy:
 
-- Attach Caddy to the `monitoring` network:
-  - Edit `/srv/infrastructure/reverse-proxy/compose.yml`
-  - Uncomment `# - monitoring` under `services.caddy.networks`
+- Caddy is already attached to the `monitoring` network by default in this blueprint.
+  If you customized `/srv/infrastructure/reverse-proxy/compose.yml`, ensure `monitoring` is listed under `services.caddy.networks`.
 
 - Add hostnames to `/srv/infrastructure/reverse-proxy/Caddyfile` (templates are already present):
   - `metrics.<domain>` → `node-exporter:9100`
@@ -48,7 +47,7 @@ sudo docker compose -f compose.yml -f compose.cadvisor.yml up -d
 
 ```bash
 cd /srv/infrastructure/reverse-proxy
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 ```
 
 ## Cloudflare Zero Trust: Protect Metrics With Service Tokens
@@ -78,15 +77,15 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets:
-          - metrics.app1.example.com
-          - metrics.app2.example.com
-	    http_headers:
-	      CF-Access-Client-Id:
-	        files:
-	          - /etc/prometheus/cf_access_client_id
-	      CF-Access-Client-Secret:
-	        files:
-	          - /etc/prometheus/cf_access_client_secret
+          - metrics-app1.example.com
+          - metrics-app2.example.com
+    http_headers:
+      CF-Access-Client-Id:
+        files:
+          - /etc/prometheus/cf_access_client_id
+      CF-Access-Client-Secret:
+        files:
+          - /etc/prometheus/cf_access_client_secret
 ```
 
 Operational guidance:

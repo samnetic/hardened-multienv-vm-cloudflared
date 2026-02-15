@@ -42,8 +42,14 @@ services:
       - prometheus_data:/prometheus
 
       # Cloudflare Access Service Token headers for scraping protected /metrics endpoints
-      - /var/secrets/${ENVIRONMENT:-production}/cf_access_client_id.txt:/etc/prometheus/cf_access_client_id:ro
-      - /var/secrets/${ENVIRONMENT:-production}/cf_access_client_secret.txt:/etc/prometheus/cf_access_client_secret:ro
+      - type: bind
+        source: /var/secrets/${ENVIRONMENT:-production}/cf_access_client_id.txt
+        target: /etc/prometheus/cf_access_client_id
+        read_only: true
+      - type: bind
+        source: /var/secrets/${ENVIRONMENT:-production}/cf_access_client_secret.txt
+        target: /etc/prometheus/cf_access_client_secret
+        read_only: true
 
     # Read file-based secrets created by scripts/secrets/create-secret.sh (gid 1999).
     group_add:
@@ -126,7 +132,11 @@ services:
 
     # Expose Grafana to localhost only; then expose via Cloudflare Tunnel + Access SSO.
     ports:
-      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+      - target: 3000
+        published: ${GRAFANA_PORT:-3000}
+        protocol: tcp
+        mode: host
+        host_ip: 127.0.0.1
 
     environment:
       - GF_SERVER_HTTP_PORT=3000
@@ -151,7 +161,10 @@ services:
       - grafana_data:/var/lib/grafana
       - ./configs/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./configs/grafana/dashboards:/etc/grafana/dashboards:ro
-      - /var/secrets/${ENVIRONMENT:-production}/grafana_admin_password.txt:/etc/grafana/grafana_admin_password:ro
+      - type: bind
+        source: /var/secrets/${ENVIRONMENT:-production}/grafana_admin_password.txt
+        target: /etc/grafana/grafana_admin_password
+        read_only: true
 
     # Read file-based secrets created by scripts/secrets/create-secret.sh (gid 1999).
     group_add:

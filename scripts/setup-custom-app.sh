@@ -380,7 +380,7 @@ show_summary() {
   echo "  sudo docker compose restart"
   echo ""
   echo "  # Update from git"
-  echo "  git pull && sudo docker compose up -d --build"
+  echo "  git pull && sudo docker compose --compatibility up -d --build"
   echo ""
   echo "  # Stop application"
   echo "  sudo docker compose down"

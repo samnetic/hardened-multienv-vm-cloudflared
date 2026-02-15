@@ -25,7 +25,6 @@ services:
     read_only: true  # Root FS is immutable; writable paths are mounted volumes
     tmpfs:
       - /tmp:size=64M,mode=1777
-    pids_limit: 100
 
     # =================================================================
     # Resource Limits (Prevent abuse)
@@ -35,6 +34,7 @@ services:
         limits:
           cpus: '0.5'
           memory: 256M
+          pids: 100
         reservations:
           cpus: '0.1'
           memory: 64M
@@ -95,9 +95,9 @@ services:
       - dev-web
       - staging-web
       - prod-web
-      # Uncomment if you want to expose internal monitoring targets via Caddy
-      # (e.g. node-exporter / docker metrics proxy in infra/monitoring-agent).
-      # - monitoring
+      # Optional monitoring targets (node-exporter / dockerd metrics proxy / cadvisor).
+      # Safe to attach even if you don't run monitoring containers yet.
+      - monitoring
 
 # =================================================================
 # Volumes
@@ -125,5 +125,5 @@ networks:
     external: true
   prod-web:
     external: true
-  # monitoring:
-  #   external: true
+  monitoring:
+    external: true

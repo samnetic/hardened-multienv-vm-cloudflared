@@ -262,19 +262,19 @@ For critical apps:
 sudo docker compose pull
 
 # 2. Scale up (if using replicas)
-sudo docker compose up -d --scale app=2
+sudo docker compose --compatibility up -d --scale app=2
 
 # 3. Wait for health check
 sleep 30
 
 # 4. Scale down old
-sudo docker compose up -d --scale app=1
+sudo docker compose --compatibility up -d --scale app=1
 ```
 
 For simpler setups:
 ```bash
 # Caddy handles brief downtime gracefully
-sudo docker compose pull && sudo docker compose up -d
+sudo docker compose pull && sudo docker compose --compatibility up -d
 ```
 
 ### Maintenance Windows

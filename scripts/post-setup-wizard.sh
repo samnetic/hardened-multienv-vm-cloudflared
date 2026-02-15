@@ -258,15 +258,16 @@ init_infrastructure() {
       $SUDO find /var/secrets -type d -exec chmod 700 {} \;
     fi
 
-    # Copy templates (idempotent: only if reverse-proxy is missing)
-    if [ ! -f "${infra_root}/reverse-proxy/compose.yml" ]; then
-      print_step "Copying infrastructure templates..."
-      $SUDO cp -r "$PROJECT_ROOT/infra/"* "$infra_root/"
-      $SUDO chown -R sysadmin:sysadmin "$infra_root" 2>/dev/null || true
-      print_success "Templates copied to $infra_root"
-    else
-      print_info "Infrastructure templates already present (skipping copy)"
-    fi
+	    # Copy templates (idempotent: only if reverse-proxy is missing)
+	    if [ ! -f "${infra_root}/reverse-proxy/compose.yml" ]; then
+	      print_step "Copying infrastructure templates..."
+	      # Copy the whole infra tree (including dotfiles) without deleting existing state.
+	      $SUDO cp -a "$PROJECT_ROOT/infra/." "$infra_root/"
+	      $SUDO chown -R sysadmin:sysadmin "$infra_root" 2>/dev/null || true
+	      print_success "Templates copied to $infra_root"
+	    else
+	      print_info "Infrastructure templates already present (skipping copy)"
+	    fi
 
     # Start reverse proxy (Caddy)
     if [ -f "${infra_root}/reverse-proxy/compose.yml" ]; then
@@ -276,14 +277,14 @@ init_infrastructure() {
         $SUDO "$PROJECT_ROOT/scripts/create-networks.sh" || print_warning "Network creation reported an error (continuing)"
       else
         print_warning "Missing script: $PROJECT_ROOT/scripts/create-networks.sh"
-      fi
-      print_step "Starting reverse proxy..."
-      if run_compose "${infra_root}/reverse-proxy" up -d; then
-        print_success "Reverse proxy started"
-      else
-        print_error "Failed to start reverse proxy (sudo docker compose up -d)"
-      fi
-    else
+	      fi
+	      print_step "Starting reverse proxy..."
+	      if run_compose "${infra_root}/reverse-proxy" --compatibility up -d; then
+	        print_success "Reverse proxy started"
+	      else
+	        print_error "Failed to start reverse proxy (sudo docker compose --compatibility up -d)"
+	      fi
+	    else
       print_warning "Reverse proxy compose.yml not found at ${infra_root}/reverse-proxy/compose.yml"
     fi
 
@@ -393,20 +394,20 @@ services:
       - prod-web
     security_opt:
       - no-new-privileges:true
-    cap_drop:
-      - ALL
-    read_only: true
-    tmpfs:
-      - /tmp:size=64M,mode=1777
-    pids_limit: 200
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-        reservations:
-          cpus: '0.25'
-          memory: 256M
+	    cap_drop:
+	      - ALL
+	    read_only: true
+	    tmpfs:
+	      - /tmp:size=64M,mode=1777
+	    deploy:
+	      resources:
+	        limits:
+	          cpus: '1.0'
+	          memory: 1G
+	          pids: 200
+	        reservations:
+	          cpus: '0.25'
+	          memory: 256M
 
 volumes:
   n8n_data:
@@ -416,13 +417,13 @@ networks:
     external: true
 EOF
 
-  print_success "Configuration created"
+	  print_success "Configuration created"
 
-  print_step "Starting n8n..."
-  if ! run_compose "$app_dir" up -d; then
-    print_error "Failed to start n8n (sudo docker compose up -d)"
-    return 1
-  fi
+	  print_step "Starting n8n..."
+	  if ! run_compose "$app_dir" --compatibility up -d; then
+	    print_error "Failed to start n8n (sudo docker compose --compatibility up -d)"
+	    return 1
+	  fi
 
   print_success "n8n deployed!"
   echo ""
@@ -485,20 +486,20 @@ services:
       - prod-web
     security_opt:
       - no-new-privileges:true
-    cap_drop:
-      - ALL
-    read_only: true
-    tmpfs:
-      - /tmp:size=64M,mode=1777
-    pids_limit: 200
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-        reservations:
-          cpus: '0.25'
-          memory: 256M
+	    cap_drop:
+	      - ALL
+	    read_only: true
+	    tmpfs:
+	      - /tmp:size=64M,mode=1777
+	    deploy:
+	      resources:
+	        limits:
+	          cpus: '1.0'
+	          memory: 1G
+	          pids: 200
+	        reservations:
+	          cpus: '0.25'
+	          memory: 256M
 
 volumes:
   nocodb_data:
@@ -508,13 +509,13 @@ networks:
     external: true
 EOF
 
-  print_success "Configuration created"
+	  print_success "Configuration created"
 
-  print_step "Starting NocoDB..."
-  if ! run_compose "$app_dir" up -d; then
-    print_error "Failed to start NocoDB (sudo docker compose up -d)"
-    return 1
-  fi
+	  print_step "Starting NocoDB..."
+	  if ! run_compose "$app_dir" --compatibility up -d; then
+	    print_error "Failed to start NocoDB (sudo docker compose --compatibility up -d)"
+	    return 1
+	  fi
 
   print_success "NocoDB deployed!"
   echo ""
@@ -553,7 +554,7 @@ deploy_plausible() {
   print_command "git clone https://github.com/plausible/hosting /srv/apps/production/plausible"
   print_command "cd /srv/apps/production/plausible"
   print_command "vim docker-compose.yml  # Configure your domain"
-  print_command "sudo docker compose up -d"
+  print_command "sudo docker compose --compatibility up -d"
   echo ""
   print_info "See: https://plausible.io/docs/self-hosting"
   echo ""
@@ -605,20 +606,20 @@ services:
       - prod-web
     security_opt:
       - no-new-privileges:true
-    cap_drop:
-      - ALL
-    read_only: true
-    tmpfs:
-      - /tmp:size=64M,mode=1777
-    pids_limit: 200
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-        reservations:
-          cpus: '0.1'
-          memory: 128M
+	    cap_drop:
+	      - ALL
+	    read_only: true
+	    tmpfs:
+	      - /tmp:size=64M,mode=1777
+	    deploy:
+	      resources:
+	        limits:
+	          cpus: '0.5'
+	          memory: 512M
+	          pids: 200
+	        reservations:
+	          cpus: '0.1'
+	          memory: 128M
 
 volumes:
   uptime_kuma_data:
@@ -628,13 +629,13 @@ networks:
     external: true
 EOF
 
-  print_success "Configuration created"
+	  print_success "Configuration created"
 
-  print_step "Starting Uptime Kuma..."
-  if ! run_compose "$app_dir" up -d; then
-    print_error "Failed to start Uptime Kuma (sudo docker compose up -d)"
-    return 1
-  fi
+	  print_step "Starting Uptime Kuma..."
+	  if ! run_compose "$app_dir" --compatibility up -d; then
+	    print_error "Failed to start Uptime Kuma (sudo docker compose --compatibility up -d)"
+	    return 1
+	  fi
 
   print_success "Uptime Kuma deployed!"
   echo ""
@@ -663,7 +664,7 @@ deploy_custom_app() {
   echo "  1. Place your compose.yml in $app_dir"
   echo "  2. Ensure container name matches: ${container_name}"
   echo "  3. Ensure it connects to 'prod-web' network"
-  echo "  4. Start with: sudo docker compose up -d"
+  echo "  4. Start with: sudo docker compose --compatibility up -d"
   echo ""
 
   pause
@@ -691,6 +692,7 @@ configure_caddy() {
     print_info "Add this block:"
     echo ""
     echo "http://${subdomain}.${DOMAIN} {"
+    echo "  import tunnel_only"
     echo "  import security_headers"
     echo "  reverse_proxy ${container_name}:${port} {"
     echo "    import proxy_headers"
@@ -700,6 +702,18 @@ configure_caddy() {
     pause
     return 0
   fi
+
+  if ! add_caddy_route_only "$subdomain" "$container_name" "$port"; then
+    return 1
+  fi
+
+  configure_dns "$subdomain"
+}
+
+add_caddy_route_only() {
+  local subdomain="$1"
+  local container_name="$2"
+  local port="$3"
 
   local caddyfile="/srv/infrastructure/reverse-proxy/Caddyfile"
 
@@ -711,11 +725,19 @@ configure_caddy() {
 
   print_step "Adding route to Caddyfile..."
 
+  if grep -qF "http://${subdomain}.${DOMAIN}" "$caddyfile"; then
+    print_warning "A route for ${subdomain}.${DOMAIN} already exists in the Caddyfile."
+    if ! confirm "Append another block anyway?"; then
+      return 0
+    fi
+  fi
+
   # Add route to Caddyfile
   $SUDO tee -a "$caddyfile" >/dev/null << EOF
 
 # ${subdomain} - Added by wizard $(date)
 http://${subdomain}.${DOMAIN} {
+  import tunnel_only
   import security_headers
   reverse_proxy ${container_name}:${port} {
     import proxy_headers
@@ -734,8 +756,7 @@ EOF
   fi
 
   print_success "Caddy reloaded!"
-
-  configure_dns "$subdomain"
+  return 0
 }
 
 configure_dns() {
@@ -771,6 +792,176 @@ configure_dns() {
   pause
 }
 
+setup_monitoring_agent() {
+  print_header "Monitoring Agent (Exporters)"
+
+  echo "Recommended with a separate monitoring VPS (Prometheus/Grafana/alerting)."
+  echo ""
+  echo "What this enables on this VPS:"
+  echo "  • node-exporter (system metrics)"
+  echo "  • dockerd-metrics-proxy (Docker daemon metrics; no docker.sock)"
+  echo ""
+  echo -e "${CYAN}Docs:${NC}"
+  print_command "cat docs/18-monitoring-server.md"
+  echo ""
+
+  ensure_docker_access
+
+  local infra_root="/srv/infrastructure"
+  local agent_dir="${infra_root}/monitoring-agent"
+  if [ ! -d "$agent_dir" ]; then
+    print_error "Monitoring agent not found at: $agent_dir"
+    print_info "Initialize infrastructure first (wizard step 1) or run ./setup.sh"
+    pause
+    return 1
+  fi
+
+  print_step "Ensuring Docker networks exist..."
+  if [ -x "$PROJECT_ROOT/scripts/create-networks.sh" ]; then
+    $SUDO "$PROJECT_ROOT/scripts/create-networks.sh" || print_warning "Network creation reported an error (continuing)"
+  else
+    print_warning "Missing script: $PROJECT_ROOT/scripts/create-networks.sh"
+  fi
+
+  if [ ! -f "${agent_dir}/.env" ] && [ -f "${agent_dir}/.env.example" ]; then
+    print_step "Creating monitoring-agent .env from .env.example..."
+    $SUDO cp "${agent_dir}/.env.example" "${agent_dir}/.env"
+    $SUDO chown sysadmin:sysadmin "${agent_dir}/.env" 2>/dev/null || true
+  fi
+
+  local enable_cadvisor="no"
+  if confirm "Enable per-container metrics via cAdvisor? (requires docker.sock; higher privilege)" "n"; then
+    enable_cadvisor="yes"
+  fi
+
+  print_step "Starting monitoring agent..."
+  if [ "$enable_cadvisor" = "yes" ]; then
+    if ! run_compose "$agent_dir" --compatibility -f compose.yml -f compose.cadvisor.yml up -d; then
+      print_error "Failed to start monitoring agent (cAdvisor enabled)"
+      pause
+      return 1
+    fi
+  else
+    if ! run_compose "$agent_dir" --compatibility up -d; then
+      print_error "Failed to start monitoring agent"
+      pause
+      return 1
+    fi
+  fi
+
+  print_success "Monitoring agent started"
+  echo ""
+
+  if confirm "Add Caddy routes for scrape endpoints (recommended)?" "y"; then
+    local label=""
+    echo ""
+    echo "Optional label to distinguish this VPS in DNS."
+    echo "Cloudflare Free Universal SSL covers one-level names (e.g., metrics-app1.${DOMAIN}), not metrics.app1.${DOMAIN}."
+    echo ""
+    read -rp "Label [blank for none]: " label
+    label="$(echo "$label" | xargs | tr '[:upper:]' '[:lower:]')"
+
+    while [ -n "$label" ] && [[ ! "$label" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; do
+      print_error "Invalid label: '$label' (use letters/numbers/hyphens only)"
+      read -rp "Label [blank for none]: " label
+      label="$(echo "$label" | xargs | tr '[:upper:]' '[:lower:]')"
+    done
+
+    local metrics_sub="metrics"
+    local docker_metrics_sub="docker-metrics"
+    local cadvisor_sub="cadvisor"
+    if [ -n "$label" ]; then
+      metrics_sub="metrics-${label}"
+      docker_metrics_sub="docker-metrics-${label}"
+      cadvisor_sub="cadvisor-${label}"
+    fi
+
+    add_caddy_route_only "$metrics_sub" "node-exporter" "9100"
+    add_caddy_route_only "$docker_metrics_sub" "dockerd-metrics-proxy" "9324"
+    if [ "$enable_cadvisor" = "yes" ]; then
+      add_caddy_route_only "$cadvisor_sub" "cadvisor" "8080"
+    fi
+
+    echo ""
+    print_info "DNS note:"
+    echo "  If you already have a wildcard CNAME (*.${DOMAIN}) to your tunnel, you're done."
+    echo "  Otherwise create CNAME records for:"
+    echo "    • ${metrics_sub}.${DOMAIN}"
+    echo "    • ${docker_metrics_sub}.${DOMAIN}"
+    if [ "$enable_cadvisor" = "yes" ]; then
+      echo "    • ${cadvisor_sub}.${DOMAIN}"
+    fi
+    echo ""
+
+    print_warning "Protect these hostnames in Cloudflare Zero Trust with Access -> Service Auth (service token)."
+    print_info "Guide: docs/14-cloudflare-zero-trust.md"
+    echo ""
+  fi
+
+  pause
+  return 0
+}
+
+setup_netdata() {
+  print_header "Local Netdata (Dashboard)"
+
+  echo "Netdata is convenient for quick visibility, but requires elevated host visibility"
+  echo "(extra capabilities, relaxed AppArmor, and docker.sock)."
+  echo ""
+  print_warning "Only enable Netdata if you will protect it with Cloudflare Access (SSO/OTP)."
+  echo ""
+
+  if ! confirm "Start local Netdata now?"; then
+    return 0
+  fi
+
+  ensure_docker_access
+
+  local infra_root="/srv/infrastructure"
+  local mon_dir="${infra_root}/monitoring"
+  if [ ! -d "$mon_dir" ]; then
+    print_error "Netdata stack not found at: $mon_dir"
+    print_info "Initialize infrastructure first (wizard step 1) or run ./setup.sh"
+    pause
+    return 1
+  fi
+
+  print_step "Ensuring Docker networks exist..."
+  if [ -x "$PROJECT_ROOT/scripts/create-networks.sh" ]; then
+    $SUDO "$PROJECT_ROOT/scripts/create-networks.sh" || print_warning "Network creation reported an error (continuing)"
+  else
+    print_warning "Missing script: $PROJECT_ROOT/scripts/create-networks.sh"
+  fi
+
+  if [ ! -f "${mon_dir}/.env" ] && [ -f "${mon_dir}/.env.example" ]; then
+    print_step "Creating Netdata .env from .env.example..."
+    $SUDO cp "${mon_dir}/.env.example" "${mon_dir}/.env"
+    $SUDO chown sysadmin:sysadmin "${mon_dir}/.env" 2>/dev/null || true
+  fi
+
+  print_step "Starting Netdata..."
+  if ! run_compose "$mon_dir" --compatibility up -d; then
+    print_error "Failed to start Netdata"
+    pause
+    return 1
+  fi
+  print_success "Netdata started"
+  echo ""
+
+  if confirm "Add Caddy route monitoring.${DOMAIN} now?" "y"; then
+    add_caddy_route_only "monitoring" "netdata" "19999"
+    echo ""
+    print_warning "Protect monitoring.${DOMAIN} with Cloudflare Access Allow (SSO/OTP)."
+    print_info "Guide: docs/14-cloudflare-zero-trust.md"
+  else
+    echo ""
+    print_info "Enable later by editing /srv/infrastructure/reverse-proxy/Caddyfile"
+  fi
+
+  pause
+  return 0
+}
+
 setup_monitoring() {
   print_header "Optional: Set Up Monitoring"
 
@@ -778,38 +969,41 @@ setup_monitoring() {
   echo ""
   echo "Why separate?"
   echo "  • Your app VPS should not hold credentials to its own monitoring/control plane"
-  echo "  • Many monitoring agents require privileged access (Docker socket, SYS_ADMIN)"
-  echo ""
-  echo -e "${CYAN}Recommended monitoring options:${NC}"
-  echo "  1) Separate monitoring VPS (Recommended)"
-  echo "     - Run Grafana/Prometheus/Loki there"
-  echo "     - Use lightweight agents here (node_exporter, promtail)"
-  echo ""
-  echo "  2) Local Netdata (Optional)"
-  echo "     - Quick visibility but requires elevated access on this VPS"
-  echo "     - Must be protected with Cloudflare Access"
+  echo "  • Monitoring UIs should be protected behind Cloudflare Access (SSO/Service Auth)"
   echo ""
 
-  if ! confirm "Review monitoring options now?"; then
-    print_info "Skipped monitoring guidance"
-    echo ""
-    print_info "Docs:"
-    print_command "cat docs/13-monitoring-with-netdata.md"
-    print_command "cat docs/14-cloudflare-zero-trust.md"
-    echo ""
-    return 0
-  fi
+  local options=(
+    "Enable monitoring-agent exporters (recommended with separate monitoring VPS)"
+    "Enable local Netdata dashboard (higher privilege; protect with Access)"
+    "Skip monitoring setup"
+  )
 
-  echo ""
-  print_info "If you choose local Netdata, follow:"
-  print_command "cd /srv/infrastructure/monitoring && sudo docker compose up -d"
-  print_command "nano /srv/infrastructure/reverse-proxy/Caddyfile   # enable monitoring route"
-  print_command "./scripts/update-caddy.sh"
-  echo ""
-  print_warning "Before exposing monitoring, add Cloudflare Access policy for monitoring.${DOMAIN}"
-  echo ""
+  show_menu "Monitoring Options:" "${options[@]}"
+  local choice
+  choice=$(get_choice "${#options[@]}")
 
-  pause
+  case "$choice" in
+    0)
+      print_info "Exiting wizard"
+      exit 0
+      ;;
+    1)
+      setup_monitoring_agent
+      ;;
+    2)
+      setup_netdata
+      ;;
+    3)
+      print_info "Skipping monitoring setup"
+      echo ""
+      print_info "Docs:"
+      print_command "cat docs/17-monitoring-separate-vps.md"
+      print_command "cat docs/18-monitoring-server.md"
+      print_command "cat docs/14-cloudflare-zero-trust.md"
+      echo ""
+      pause
+      ;;
+  esac
 }
 
 show_completion() {

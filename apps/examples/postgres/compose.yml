@@ -27,8 +27,6 @@ services:
       - /tmp:size=64M,mode=1777
       - /var/run/postgresql:size=16M,mode=1777
 
-    pids_limit: 300
-
     # =================================================================
     # Resource Limits
     # =================================================================
@@ -37,6 +35,7 @@ services:
         limits:
           cpus: '1.0'
           memory: 1G
+          pids: 300
         reservations:
           cpus: '0.25'
           memory: 256M
@@ -83,4 +82,3 @@ networks:
 
 volumes:
   postgres_data:
-

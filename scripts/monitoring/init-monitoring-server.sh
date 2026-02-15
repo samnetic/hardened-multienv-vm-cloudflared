@@ -202,6 +202,6 @@ echo -e "${GREEN}✓ Monitoring server prerequisites are ready.${NC}"
 echo ""
 echo "Next:"
 echo "  cd /srv/infrastructure/monitoring-server"
-echo "  sudo docker compose up -d"
+echo "  sudo docker compose --compatibility up -d"
 echo ""
 

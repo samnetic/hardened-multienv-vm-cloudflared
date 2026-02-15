@@ -113,7 +113,7 @@ sudo ./scripts/create-networks.sh
 4. Start the reverse proxy:
 ```bash
 cd /srv/infrastructure/reverse-proxy
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 ```
 
 5. Create secrets (stored in `/var/secrets`):

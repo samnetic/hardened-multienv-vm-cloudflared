@@ -187,7 +187,8 @@ fi
 # Deploy containers
 echo ""
 echo "Deploying containers..."
-compose up -d --remove-orphans
+# Use --compatibility so deploy.resources limits apply in non-swarm docker compose.
+compose --compatibility up -d --remove-orphans
 
 # Wait for healthiness
 echo ""

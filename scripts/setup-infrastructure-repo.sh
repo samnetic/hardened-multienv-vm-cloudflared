@@ -295,24 +295,24 @@ if confirm "Start Caddy now?" "y"; then
 
   print_step "Validating Caddyfile..."
   if docker run --rm --network none -v "/srv/infrastructure/reverse-proxy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile 2>&1; then
-    print_success "Caddyfile is valid"
-    print_step "Starting Caddy..."
-    cd /srv/infrastructure/reverse-proxy
-    docker compose up -d
-    sleep 2
-    if docker compose ps | grep -q "caddy.*Up"; then
-      print_success "Caddy is running!"
-      docker compose ps
+	    print_success "Caddyfile is valid"
+	    print_step "Starting Caddy..."
+	    cd /srv/infrastructure/reverse-proxy
+	    docker compose --compatibility up -d
+	    sleep 2
+	    if docker compose ps | grep -q "caddy.*Up"; then
+	      print_success "Caddy is running!"
+	      docker compose ps
     else
       print_error "Caddy failed to start"
       print_info "Check logs: sudo docker compose -f /srv/infrastructure/reverse-proxy/compose.yml logs"
     fi
   else
     print_error "Caddyfile validation failed"
-    print_info "Start manually after fixing: cd /srv/infrastructure/reverse-proxy && sudo docker compose up -d"
+    print_info "Start manually after fixing: cd /srv/infrastructure/reverse-proxy && sudo docker compose --compatibility up -d"
   fi
 else
-  print_info "Start Caddy later: cd /srv/infrastructure/reverse-proxy && sudo docker compose up -d"
+  print_info "Start Caddy later: cd /srv/infrastructure/reverse-proxy && sudo docker compose --compatibility up -d"
 fi
 
 # Summary
@@ -344,7 +344,7 @@ echo "3. Deploy Your First App"
 echo "   cd /srv/apps"
 echo "   cp -r _template myapp && cd myapp"
 echo "   vim compose.yml  # Configure"
-echo "   sudo docker compose up -d"
+echo "   sudo docker compose --compatibility up -d"
 echo ""
 echo "4. Check DNS Exposure"
 echo "   sudo /opt/hosting-blueprint/scripts/check-dns-exposure.sh $DOMAIN"

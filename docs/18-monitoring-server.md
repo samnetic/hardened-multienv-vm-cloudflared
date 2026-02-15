@@ -11,14 +11,17 @@ Goal: if the **app VPS is compromised**, monitoring should remain harder to comp
 
 Avoid collisions by giving each VPS its own metrics subdomains:
 
-- `metrics.<app1>.yourdomain.com` (node-exporter)
-- `docker-metrics.<app1>.yourdomain.com` (dockerd metrics)
-- `cadvisor.<app1>.yourdomain.com` (per-container metrics, optional)
+- `metrics-<app1>.yourdomain.com` (node-exporter)
+- `docker-metrics-<app1>.yourdomain.com` (dockerd metrics)
+- `cadvisor-<app1>.yourdomain.com` (per-container metrics, optional)
+
+Note: on Cloudflare Free, Universal SSL covers `yourdomain.com` and `*.yourdomain.com` (one level),
+but not multi-level names like `metrics.app1.yourdomain.com`. Use the hyphen pattern above.
 
 Example for two app VPSes:
 
-- `metrics.app1.example.com`, `docker-metrics.app1.example.com`, `cadvisor.app1.example.com`
-- `metrics.app2.example.com`, `docker-metrics.app2.example.com`, `cadvisor.app2.example.com`
+- `metrics-app1.example.com`, `docker-metrics-app1.example.com`, `cadvisor-app1.example.com`
+- `metrics-app2.example.com`, `docker-metrics-app2.example.com`, `cadvisor-app2.example.com`
 
 If you use a wildcard tunnel DNS record (`*.yourdomain.com`), you usually don't need to create extra tunnel routes per hostname.
 
@@ -29,7 +32,7 @@ If you use a wildcard tunnel DNS record (`*.yourdomain.com`), you usually don't 
 ```bash
 cd /srv/infrastructure/monitoring-agent
 cp .env.example .env
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 ```
 
 Exports:
@@ -47,27 +50,27 @@ Security note: cAdvisor requires the Docker socket and host mounts (higher privi
 
 ```bash
 cd /srv/infrastructure/monitoring-agent
-sudo docker compose -f compose.yml -f compose.cadvisor.yml up -d
+sudo docker compose --compatibility -f compose.yml -f compose.cadvisor.yml up -d
 ```
 
 ### 3. Expose scrape endpoints via Caddy
 
-1. Attach Caddy to the `monitoring` network:
+1. Ensure Caddy can reach monitoring targets:
 
-- Edit `/srv/infrastructure/reverse-proxy/compose.yml`
-- Uncomment `# - monitoring` under `services.caddy.networks`
+- Caddy is attached to the `monitoring` network by default in this blueprint.
+  If you customized `/srv/infrastructure/reverse-proxy/compose.yml`, ensure `monitoring` is listed under `services.caddy.networks`.
 
 2. Enable the metrics hostnames in `/srv/infrastructure/reverse-proxy/Caddyfile`:
 
-- `metrics.<app>.yourdomain.com` → `node-exporter:9100`
-- `docker-metrics.<app>.yourdomain.com` → `dockerd-metrics-proxy:9324`
-- `cadvisor.<app>.yourdomain.com` → `cadvisor:8080` (optional)
+- `metrics-<app>.yourdomain.com` → `node-exporter:9100`
+- `docker-metrics-<app>.yourdomain.com` → `dockerd-metrics-proxy:9324`
+- `cadvisor-<app>.yourdomain.com` → `cadvisor:8080` (optional)
 
 3. Restart Caddy:
 
 ```bash
 cd /srv/infrastructure/reverse-proxy
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 ```
 
 ## Cloudflare Zero Trust: Lock Metrics with Service Tokens
@@ -80,9 +83,9 @@ In Cloudflare Zero Trust:
    - Access → Service Auth → Service Tokens
    - Create token `prometheus-scraper`
 2. Create Access applications (Self-hosted) for:
-   - `metrics.app1.yourdomain.com`
-   - `docker-metrics.app1.yourdomain.com`
-   - `cadvisor.app1.yourdomain.com` (if enabled)
+   - `metrics-app1.yourdomain.com`
+   - `docker-metrics-app1.yourdomain.com`
+   - `cadvisor-app1.yourdomain.com` (if enabled)
 3. For each application, add a policy:
    - Action: **Service Auth**
    - Include: **Service Token** `prometheus-scraper`
@@ -117,7 +120,7 @@ Then:
 Start:
 
 ```bash
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 ```
 
 Optional:

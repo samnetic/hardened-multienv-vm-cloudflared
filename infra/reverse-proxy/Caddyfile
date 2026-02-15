@@ -218,7 +218,7 @@ http://app.yourdomain.com {
 # - Protect with Cloudflare Access (Service Auth) using service tokens
 #
 # Notes:
-# - You must attach Caddy to the `monitoring` network in infra/reverse-proxy/compose.yml
+# - Caddy is attached to the `monitoring` network by default in this blueprint (see infra/reverse-proxy/compose.yml).
 # - Create DNS + Access apps for these hostnames (see docs/14-cloudflare-zero-trust.md)
 # =================================================================
 

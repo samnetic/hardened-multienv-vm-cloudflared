@@ -48,7 +48,7 @@ sudo /opt/hosting-blueprint/scripts/update-caddy.sh /srv/infrastructure/reverse-
 ### 4. Start Caddy
 ```bash
 cd /srv/infrastructure/reverse-proxy
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 ```
 
 ## 🔧 Daily Operations
@@ -96,7 +96,7 @@ vim compose.yml  # Update service name, ports, etc.
 vim .env         # Set environment variables
 
 # Start app
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 
 # Verify
 sudo docker compose ps

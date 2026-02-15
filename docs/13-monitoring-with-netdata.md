@@ -26,7 +26,7 @@ cp .env.example .env
 nano .env  # Set HOSTNAME
 
 # 2. Start Netdata
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 
 # 3. Enable in Caddyfile (uncomment monitoring section)
 nano /srv/infrastructure/reverse-proxy/Caddyfile
@@ -107,7 +107,7 @@ Free remote access without exposing ports:
    NETDATA_CLAIM_TOKEN=your-token
    NETDATA_CLAIM_ROOMS=your-room-id
    ```
-4. Restart: `sudo docker compose up -d`
+4. Restart: `sudo docker compose --compatibility up -d`
 
 ## Resource Usage
 

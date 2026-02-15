@@ -69,7 +69,7 @@ Steps:
    - Example name: `prometheus-scraper`
    - Copy Client ID + Client Secret (shown once)
 2. Access -> Applications -> Add -> Self-hosted
-   - Example hostname: `metrics.app1.yourdomain.com`
+   - Example hostname: `metrics-app1.yourdomain.com`
 3. Policy:
    - Action: Service Auth
    - Include: Service Token `prometheus-scraper`

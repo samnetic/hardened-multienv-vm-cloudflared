@@ -37,7 +37,7 @@
 SSH to your VM and run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/bootstrap.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/bootstrap.sh | sudo bash
 ```
 
 That's it! The script will:
@@ -113,7 +113,7 @@ That's it! The script will:
 sudo mkdir -p /srv/apps/staging
 sudo cp -r /opt/hosting-blueprint/apps/_template /srv/apps/staging/myapp
 cd /srv/apps/staging/myapp
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 ```
 
 ### Use Included Examples

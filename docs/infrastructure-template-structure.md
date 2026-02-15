@@ -270,7 +270,7 @@ This creates Docker networks, directories, and starts Caddy.
 cd apps/n8n
 cp .env.example .env
 nano .env  # Set DOMAIN
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 
 #
 # Portainer:

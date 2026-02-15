@@ -312,9 +312,9 @@ verify_services() {
   else
     print_warning "Caddy reverse proxy not running"
     if [ -d "/srv/infrastructure/reverse-proxy" ]; then
-      print_info "Start with: cd /srv/infrastructure/reverse-proxy && sudo docker compose up -d"
+      print_info "Start with: cd /srv/infrastructure/reverse-proxy && sudo docker compose --compatibility up -d"
     else
-      print_info "Start with: cd infra/reverse-proxy && sudo docker compose up -d"
+      print_info "Start with: cd infra/reverse-proxy && sudo docker compose --compatibility up -d"
       print_info "(Recommended: initialize /srv/infrastructure first)"
     fi
   fi
@@ -419,7 +419,7 @@ test_ssh_access() {
     echo -e "${CYAN}  # (connects to ssh.${tunnel_domain} as ${SYSADMIN_USER})${NC}"
     echo ""
     echo "Tip: if you haven't configured your local SSH alias yet:"
-    echo -e "${CYAN}  curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.${tunnel_domain} ${SYSADMIN_USER}${NC}"
+    echo -e "${CYAN}  curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.${tunnel_domain} ${SYSADMIN_USER}${NC}"
   else
     echo -e "${CYAN}  ssh ${SYSADMIN_USER}@YOUR_SERVER_IP${NC}"
     echo ""
@@ -546,7 +546,7 @@ display_next_steps() {
   echo ""
   echo -e "3. ${BOLD}Deploy your first app${NC}"
   echo "   cp -r apps/_template apps/myapp"
-  echo "   cd apps/myapp && sudo docker compose up -d"
+  echo "   cd apps/myapp && sudo docker compose --compatibility up -d"
   echo ""
   echo -e "4. ${BOLD}Set up GitOps CI/CD${NC}"
   echo "   See: .github/workflows/deploy.yml"

@@ -122,7 +122,7 @@ if [ "$errors" -gt 0 ]; then
   echo "Fix:"
   echo "  1. Remove 'ports:' from the affected compose.yml"
   echo "  2. Route traffic via Caddy (internal Docker networks)"
-  echo "  3. Recreate: sudo docker compose up -d"
+  echo "  3. Recreate: sudo docker compose --compatibility up -d"
   exit 1
 fi
 

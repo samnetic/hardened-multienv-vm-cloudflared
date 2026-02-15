@@ -159,7 +159,7 @@ git push -u origin main
 
 # 5. Start Caddy
 cd /srv/infrastructure/reverse-proxy
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 ```
 
 ## Daily Workflows
@@ -194,7 +194,7 @@ vim compose.yml
 vim .env
 
 # 3. Start app
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 
 # 4. Add to Caddy
 vim /srv/infrastructure/reverse-proxy/Caddyfile
@@ -375,7 +375,7 @@ git add . && git commit -m "Update" && git push
 
 # Deploy app
 cd /srv/apps/myapp
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 ```
 
 This structure follows Linux FHS while being practical for infrastructure management.

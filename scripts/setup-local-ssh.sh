@@ -12,10 +12,10 @@
 #
 # Usage:
 #   # Download and run directly:
-#   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin ~/.ssh/id_rsa
+#   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin ~/.ssh/id_rsa
 #
 #   # Or download, review, then run:
-#   wget https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh
+#   wget https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh
 #   chmod +x setup-local-ssh.sh
 #   ./setup-local-ssh.sh ssh.yourdomain.com sysadmin ~/.ssh/id_rsa
 #

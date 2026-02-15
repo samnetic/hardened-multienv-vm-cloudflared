@@ -140,7 +140,7 @@ op read "op://Vault/Item/password" | ./scripts/secrets/create-secret.sh producti
 
 After rotating, redeploy affected containers:
 ```bash
-sudo docker compose -f apps/myapp/compose.yml up -d
+sudo docker compose --compatibility -f apps/myapp/compose.yml up -d
 ```
 
 ## Directory Structure

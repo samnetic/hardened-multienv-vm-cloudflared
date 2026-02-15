@@ -64,7 +64,7 @@ create_network() {
         echo "      1) cd /srv/infrastructure/reverse-proxy && sudo docker compose down"
         echo "      2) sudo docker network rm hosting-caddy-origin"
         echo "      3) sudo $0"
-        echo "      4) cd /srv/infrastructure/reverse-proxy && sudo docker compose up -d"
+        echo "      4) cd /srv/infrastructure/reverse-proxy && sudo docker compose --compatibility up -d"
       fi
     fi
   else

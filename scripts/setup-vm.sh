@@ -560,12 +560,14 @@ else
   find /var/secrets -type f -name '*.txt' -exec chmod 640 {} \; 2>/dev/null || true
   print_success "Secured /var/secrets (root:${SECRETS_GROUP}, 750 dirs, 640 files)"
 
-  # Fix repository ownership so the admin user can maintain the blueprint after
-  # the default cloud user is locked/removed.
-  if [ -d "${REPO_DIR}/.git" ]; then
-    print_step "Fixing repository ownership for $SYSADMIN_USER..."
-    chown -R "${SYSADMIN_USER}:${SYSADMIN_USER}" "${REPO_DIR}"
-    print_success "Repository ownership set to $SYSADMIN_USER"
+  # Security: keep the blueprint root-owned.
+  # Root will execute these scripts; do not make them writable by non-root.
+  # (Admins can still update it using sudo git pull.)
+  if [ -d "${REPO_DIR}/.git" ] && [[ "${REPO_DIR}" == "/opt/hosting-blueprint" ]]; then
+    print_step "Securing blueprint permissions (root-owned)..."
+    chown -R root:root "${REPO_DIR}" 2>/dev/null || true
+    chmod -R go-w "${REPO_DIR}" 2>/dev/null || true
+    print_success "Blueprint secured at ${REPO_DIR}"
   fi
 fi
 
@@ -1413,7 +1415,7 @@ echo "  1. Set up Cloudflare Tunnel: sudo ./scripts/install-cloudflared.sh"
 echo "  2. Deploy your first app:"
 echo "     sudo mkdir -p /srv/apps/staging"
 echo "     sudo cp -r /opt/hosting-blueprint/apps/_template /srv/apps/staging/myapp"
-echo "     cd /srv/apps/staging/myapp && sudo docker compose up -d"
+echo "     cd /srv/apps/staging/myapp && sudo docker compose --compatibility up -d"
 echo "  3. Set up GitOps CI/CD: See .github/workflows/deploy.yml"
 echo "  4. Review docs/ for detailed guides"
 echo ""

@@ -83,7 +83,7 @@ Caddy connects to:
 - `dev-web` - Dev environment apps
 - `staging-web` - Staging environment apps
 - `prod-web` - Production environment apps
-- `monitoring` (optional) - For Prometheus metrics (if enabled)
+- `monitoring` - Optional monitoring targets (safe to attach even if unused)
 
 Before starting, ensure networks exist:
 

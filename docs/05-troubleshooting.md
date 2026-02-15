@@ -127,7 +127,7 @@ sudo ./scripts/create-networks.sh
 
 # Restart reverse proxy
 cd /srv/infrastructure/reverse-proxy
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 
 # If you intentionally changed the gateway/subnet, update infra/reverse-proxy/Caddyfile (tunnel_only)
 # then reload:
@@ -332,7 +332,7 @@ ssh -o ProxyCommand="cloudflared access ssh --hostname ssh.yourdomain.com" sysad
 
 Quick setup (recommended):
 ```bash
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
 
 # Default alias is the first label of your domain:
 ssh yourdomain
@@ -357,7 +357,7 @@ Then use: `ssh myserver`
 
 ```bash
 # Recommended (installs cloudflared + configures SSH for tunnel access)
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
 
 # Manual install (if you prefer)
 # macOS: brew install cloudflared
@@ -490,7 +490,7 @@ ssh -v myserver
 **1. cloudflared Not Installed Locally**
 ```bash
 # Recommended (installs cloudflared + configures SSH)
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
 
 # Manual:
 # macOS: brew install cloudflared
@@ -713,7 +713,7 @@ sudo docker compose restart
 
 # 3. Check all apps
 sudo docker ps -a
-sudo docker compose up -d  # In each app directory
+sudo docker compose --compatibility up -d  # In each app directory
 
 # 4. Check firewall
 sudo ufw status

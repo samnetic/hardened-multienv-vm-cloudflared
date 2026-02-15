@@ -28,9 +28,6 @@ services:
     tmpfs:
       - /tmp:size=64M,mode=1777  # Writable temp space
 
-    # Fork-bomb protection
-    pids_limit: 100
-
     # =================================================================
     # Resource Limits
     # =================================================================
@@ -39,6 +36,7 @@ services:
         limits:
           cpus: '0.5'
           memory: 256M
+          pids: 100
         reservations:
           cpus: '0.1'
           memory: 64M

@@ -105,7 +105,7 @@ fi
 if ! compose -f "$CADDY_DIR/compose.yml" ps | grep -q "caddy.*Up"; then
   print_warning "Caddy is not running. Starting it now..."
   cd "$CADDY_DIR"
-  compose up -d
+  compose --compatibility up -d
   print_success "Caddy started"
   exit 0
 fi
@@ -143,7 +143,7 @@ if compose exec caddy caddy reload --config /etc/caddy/Caddyfile 2>&1; then
 
     # Restore backup
     cp "$BACKUP_FILE" "$CADDYFILE"
-    compose up -d
+    compose --compatibility up -d
 
     print_error "Rollback complete. Check logs: sudo docker compose logs caddy"
     exit 1

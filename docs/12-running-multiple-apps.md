@@ -17,7 +17,7 @@ nano compose.yml
 ../../scripts/secrets/create-secret.sh dev db_password
 
 # 4. Deploy
-sudo docker compose up -d
+sudo docker compose --compatibility up -d
 ```
 
 ## App Structure
@@ -110,7 +110,7 @@ deploy:
 
 ```bash
 # Start app
-sudo docker compose -f apps/myapp/compose.yml up -d
+sudo docker compose --compatibility -f apps/myapp/compose.yml up -d
 
 # View logs
 sudo docker compose -f apps/myapp/compose.yml logs -f
@@ -123,7 +123,7 @@ sudo docker compose -f apps/myapp/compose.yml down
 
 # Update
 sudo docker compose -f apps/myapp/compose.yml pull
-sudo docker compose -f apps/myapp/compose.yml up -d
+sudo docker compose --compatibility -f apps/myapp/compose.yml up -d
 ```
 
 ## Common Patterns

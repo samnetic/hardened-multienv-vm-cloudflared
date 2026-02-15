@@ -40,15 +40,13 @@ services:
     # cap_add:
     #   - NET_BIND_SERVICE  # Only if binding to port < 1024
 
-    # Fork-bomb protection
-    pids_limit: 200
-
     # Resource limits
     deploy:
       resources:
         limits:
           cpus: '0.5'      # Max 0.5 CPU cores
           memory: 512M     # Max 512MB RAM
+          pids: 200        # Fork-bomb protection
         reservations:
           cpus: '0.1'      # Reserve 0.1 CPU cores
           memory: 128M     # Reserve 128MB RAM

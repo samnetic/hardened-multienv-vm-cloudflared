@@ -309,7 +309,7 @@ Type: **yes**
 Once connected to your VM:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/bootstrap.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/bootstrap.sh | sudo bash
 ```
 
 **What happens:**
@@ -399,8 +399,8 @@ After tunnel is set up, configure your **local machine** to SSH via tunnel.
 Recommended (installs cloudflared + configures `~/.ssh/config`):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com appmgr
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com appmgr
 ```
 
 Manual install (if you prefer):

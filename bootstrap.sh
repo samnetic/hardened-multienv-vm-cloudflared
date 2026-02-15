@@ -5,7 +5,7 @@
 # One-liner installation script for fresh Ubuntu VMs
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/bootstrap.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/bootstrap.sh | sudo bash
 #
 # What this does:
 #   1. Checks prerequisites (OS, root, resources, network)
@@ -127,7 +127,7 @@ check_root() {
     print_error "This script must be run as root"
     echo ""
     echo "Please run:"
-    echo "  curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/bootstrap.sh | sudo bash"
+    echo "  curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/bootstrap.sh | sudo bash"
     echo ""
     exit 1
   fi
@@ -322,14 +322,11 @@ set_permissions() {
   chmod +x "$REPO_DIR/setup.sh" 2>/dev/null || true
   find "$REPO_DIR/scripts" -type f -name '*.sh' -exec chmod +x {} \; 2>/dev/null || true
 
-  # Detect original user (who ran sudo)
-  local original_user="${SUDO_USER:-}"
-
-  if [ -n "$original_user" ] && [ "$original_user" != "root" ]; then
-    # Change ownership to original user for easier access
-    print_step "Setting ownership to $original_user..."
-    chown -R "$original_user:$original_user" "$REPO_DIR" 2>/dev/null || true
-  fi
+  # Security: keep the blueprint root-owned.
+  # Root will execute these scripts; do not make them writable by non-root.
+  print_step "Ensuring repository is root-owned (security)..."
+  chown -R root:root "$REPO_DIR" 2>/dev/null || true
+  chmod -R go-w "$REPO_DIR" 2>/dev/null || true
 
   print_success "Permissions configured"
 }

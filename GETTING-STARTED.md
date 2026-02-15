@@ -17,7 +17,7 @@ SSH to your VM and run:
 ```bash
 # From your LOCAL machine (recommended):
 # 1) Configure tunnel SSH once (creates a short alias like: ssh yourdomain)
-# curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+# curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
 #
 # 2) SSH using the generated alias (first label of your domain)
 ssh yourdomain

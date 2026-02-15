@@ -53,9 +53,6 @@ services:
     # Some apps need /var/run too:
     # - /var/run
 
-    # Fork-bomb protection
-    pids_limit: 200
-
     # =================================================================
     # Resource Limits (Prevent abuse)
     # =================================================================
@@ -64,6 +61,7 @@ services:
         limits:
           cpus: '1.0'      # Max 1 CPU core
           memory: 512M      # Max 512MB RAM
+          pids: 200         # Fork-bomb protection
         reservations:
           cpus: '0.25'      # Reserved 0.25 CPU
           memory: 128M      # Reserved 128MB RAM
