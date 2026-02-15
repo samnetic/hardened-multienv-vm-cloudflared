@@ -28,7 +28,7 @@
 (security_headers) {
   header {
     # HSTS - Force HTTPS for 1 year
-    Strict-Transport-Security "max-age=31536000;"
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
 
     # Prevent clickjacking
     X-Frame-Options "DENY"
@@ -48,10 +48,31 @@
 }
 
 (proxy_headers) {
-  header_up X-Real-IP {remote_host}
-  header_up X-Forwarded-For {remote_host}
+  # Preserve Cloudflare's client IP headers when behind cloudflared (remote_host is localhost).
+  header_up X-Real-IP {http.request.header.CF-Connecting-IP}
+  header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
   header_up X-Forwarded-Proto https  # Tell app it's behind HTTPS
   header_up X-Forwarded-Host {host}
+
+  # Defense-in-depth: strip headers used in historical Next.js middleware bypasses.
+  header_up -x-middleware-subrequest
+  header_up -x-middleware-invoke
+  header_up -x-middleware-next
+  header_up -x-invoke-path
+  header_up -x-invoke-query
+  header_up -x-invoke-output
+  header_up -x-invoke-status
+}
+
+# Defense-in-depth: even if Caddy is accidentally bound to a public interface,
+# only accept requests coming from localhost (cloudflared on the same VM).
+(tunnel_only) {
+  # Defense-in-depth: only accept traffic coming from the host via the published
+  # localhost port (cloudflared -> 127.0.0.1:80). Due to Docker NAT, the source
+  # IP as seen inside the container becomes the bridge gateway of the dedicated
+  # origin network (hosting-caddy-origin), which we pin to 10.250.0.1.
+  @not_tunnel not remote_ip 127.0.0.1 ::1 10.250.0.1
+  respond @not_tunnel 403
 }
 
 # =================================================================
@@ -63,6 +84,7 @@
 # =================================================================
 
 http://dev-app.yourdomain.com {
+  import tunnel_only
   import security_headers
 
   # Reverse proxy to dev app container
@@ -93,6 +115,7 @@ http://dev-app.yourdomain.com {
 # =================================================================
 
 http://staging-app.yourdomain.com {
+  import tunnel_only
   import security_headers
 
   # Reverse proxy to staging app container
@@ -120,6 +143,7 @@ http://staging-app.yourdomain.com {
 # =================================================================
 
 http://app.yourdomain.com {
+  import tunnel_only
   import security_headers
 
   # Reverse proxy to production app container
@@ -186,10 +210,49 @@ http://app.yourdomain.com {
 # }
 
 # =================================================================
+# METRICS (Prometheus scrape targets) - Uncomment to enable
+# =================================================================
+# Recommended pattern:
+# - Run exporters on the VM in an internal Docker network (infra/monitoring-agent)
+# - Expose scrape endpoints via Caddy
+# - Protect with Cloudflare Access (Service Auth) using service tokens
+#
+# Notes:
+# - You must attach Caddy to the `monitoring` network in infra/reverse-proxy/compose.yml
+# - Create DNS + Access apps for these hostnames (see docs/14-cloudflare-zero-trust.md)
+# =================================================================
+
+# http://metrics.yourdomain.com {
+#   import tunnel_only
+#   import security_headers
+#   reverse_proxy node-exporter:9100 {
+#     import proxy_headers
+#   }
+# }
+#
+# http://docker-metrics.yourdomain.com {
+#   import tunnel_only
+#   import security_headers
+#   reverse_proxy dockerd-metrics-proxy:9324 {
+#     import proxy_headers
+#   }
+# }
+#
+# # Optional: per-container metrics (higher privilege; see infra/monitoring-agent/compose.cadvisor.yml)
+# http://cadvisor.yourdomain.com {
+#   import tunnel_only
+#   import security_headers
+#   reverse_proxy cadvisor:8080 {
+#     import proxy_headers
+#   }
+# }
+
+# =================================================================
 # BASE DOMAIN (No subdomain - redirect or landing page)
 # =================================================================
 
 http://yourdomain.com {
+  import tunnel_only
   import security_headers
 
   # Option 1: Redirect to www (uncomment if preferred)
@@ -204,6 +267,7 @@ http://yourdomain.com {
 # =================================================================
 
 http://*.yourdomain.com {
+  import tunnel_only
   import security_headers
   respond "This subdomain is not configured yet" 404
 }

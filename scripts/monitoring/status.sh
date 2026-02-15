@@ -21,6 +21,16 @@ NC='\033[0m'
 
 QUICK_MODE="${1:-}"
 
+# Docker is root-equivalent. Prefer sudo (no docker group needed).
+# We avoid prompting for a sudo password in this script; run it with sudo if needed.
+DOCKER=(docker)
+if ! docker info &>/dev/null; then
+  DOCKER=(sudo -n docker)
+  if ! "${DOCKER[@]}" info &>/dev/null; then
+    DOCKER=()
+  fi
+fi
+
 print_header() {
   echo ""
   echo -e "${BLUE}======================================================================${NC}"
@@ -96,16 +106,18 @@ echo ""
 # DOCKER STATUS
 # =================================================================
 print_section "Docker:"
-if command -v docker &> /dev/null && docker info &> /dev/null; then
-  CONTAINERS_RUNNING=$(docker ps -q 2>/dev/null | wc -l)
-  CONTAINERS_TOTAL=$(docker ps -aq 2>/dev/null | wc -l)
-  IMAGES=$(docker images -q 2>/dev/null | wc -l)
+if [ "${#DOCKER[@]}" -gt 0 ]; then
+  CONTAINERS_RUNNING=$("${DOCKER[@]}" ps -q 2>/dev/null | wc -l)
+  CONTAINERS_TOTAL=$("${DOCKER[@]}" ps -aq 2>/dev/null | wc -l)
+  IMAGES=$("${DOCKER[@]}" images -q 2>/dev/null | wc -l)
 
   echo -e "  ${GREEN}✓${NC} Docker daemon running"
   echo "  Containers: ${CONTAINERS_RUNNING} running / ${CONTAINERS_TOTAL} total"
   echo "  Images:     ${IMAGES}"
 else
-  echo -e "  ${RED}✗${NC} Docker not running or not installed"
+  echo -e "  ${YELLOW}⚠${NC} Docker not accessible as this user"
+  echo "    Run with sudo to include Docker status:"
+  echo "      sudo $0"
 fi
 echo ""
 
@@ -119,21 +131,30 @@ fi
 # =================================================================
 print_section "Containers by Environment:"
 
-for env in dev staging prod; do
-  containers=$(docker ps --filter "network=${env}-web" --format "{{.Names}}" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
-  if [ -n "$containers" ]; then
-    echo -e "  ${GREEN}${env^^}:${NC} $containers"
-  else
-    echo -e "  ${YELLOW}${env^^}:${NC} (no containers)"
-  fi
-done
-echo ""
+if [ "${#DOCKER[@]}" -eq 0 ]; then
+  echo "  (run with sudo to view Docker containers)"
+  echo ""
+else
+  for env in dev staging prod; do
+    containers=$("${DOCKER[@]}" ps --filter "network=${env}-web" --format "{{.Names}}" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+    if [ -n "$containers" ]; then
+      echo -e "  ${GREEN}${env^^}:${NC} $containers"
+    else
+      echo -e "  ${YELLOW}${env^^}:${NC} (no containers)"
+    fi
+  done
+  echo ""
+fi
 
 # =================================================================
 # DOCKER NETWORKS
 # =================================================================
 print_section "Docker Networks:"
-docker network ls --format "  {{.Name}}" 2>/dev/null | grep -E "dev-|staging-|prod-|monitoring" || echo "  (none found)"
+if [ "${#DOCKER[@]}" -gt 0 ]; then
+  "${DOCKER[@]}" network ls --format "  {{.Name}}" 2>/dev/null | grep -E "dev-|staging-|prod-|monitoring" || echo "  (none found)"
+else
+  echo "  (run with sudo to view Docker networks)"
+fi
 echo ""
 
 # =================================================================
@@ -173,5 +194,5 @@ echo -e "${BLUE}----------------------------------------------------------------
 echo "Quick Commands:"
 echo "  ./scripts/monitoring/logs.sh        # View aggregated logs"
 echo "  ./scripts/monitoring/disk-usage.sh  # Detailed disk usage"
-echo "  docker stats --no-stream            # Container resource usage"
+echo "  sudo docker stats --no-stream       # Container resource usage"
 echo ""

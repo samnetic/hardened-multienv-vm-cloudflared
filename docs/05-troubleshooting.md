@@ -8,12 +8,12 @@ Common issues and solutions for the production hosting blueprint.
 
 ```bash
 # Check all services
-docker ps                              # All containers
+sudo docker ps                              # All containers
 sudo systemctl status cloudflared      # Tunnel
-cd infra/reverse-proxy && docker compose ps  # Caddy
+cd infra/reverse-proxy && sudo docker compose ps  # Caddy
 
 # Check logs
-docker compose logs -f                 # App logs
+sudo docker compose logs -f                 # App logs
 sudo journalctl -u cloudflared -f      # Tunnel logs
 sudo tail -f /var/log/ufw.log         # Firewall logs
 
@@ -42,17 +42,17 @@ sudo journalctl -u cloudflared --since "5 minutes ago"
 
 # 2. Check Caddy
 cd infra/reverse-proxy
-docker compose ps
-docker compose logs caddy --tail=50
+sudo docker compose ps
+sudo docker compose logs caddy --tail=50
 
 # 3. Check app
 cd apps/my-app
-docker compose ps
-docker compose logs --tail=50
+sudo docker compose ps
+sudo docker compose logs --tail=50
 
 # 4. Check networks
-docker network ls
-docker network inspect staging-web
+sudo docker network ls
+sudo docker network inspect staging-web
 ```
 
 **Solutions:**
@@ -62,11 +62,11 @@ sudo systemctl restart cloudflared
 
 # Restart Caddy
 cd infra/reverse-proxy
-docker compose restart caddy
+sudo docker compose restart caddy
 
 # Restart app
 cd apps/my-app
-docker compose restart
+sudo docker compose restart
 ```
 
 ### Symptom: 504 Gateway Timeout
@@ -76,13 +76,13 @@ docker compose restart
 **Diagnosis:**
 ```bash
 # Check app health
-docker compose exec app wget -O- http://localhost:3000/health
+sudo docker compose exec app wget -O- http://localhost:3000/health
 
 # Check resource usage
-docker stats app-staging
+sudo docker stats app-staging
 
 # Check logs for errors
-docker compose logs --tail=100
+sudo docker compose logs --tail=100
 ```
 
 **Solutions:**
@@ -98,13 +98,51 @@ deploy:
       memory: 1G  # Increase from 512M
 ```
 
+### Symptom: 403 Forbidden (Caddy `tunnel_only`)
+
+**What it means:**
+- You are likely bypassing the tunnel (hitting the VM directly by IP / wrong DNS), or
+- A container is trying to reach Caddy directly (container-to-container bypass attempt), or
+- `hosting-caddy-origin` is missing/misconfigured.
+
+**Diagnosis:**
+```bash
+# 1) Make sure you’re using the Cloudflare hostname (not the VM IP).
+
+# 2) Confirm Caddy is published to localhost only
+sudo docker ps --filter name=caddy --format '{{.Ports}}'
+
+# Expected: 127.0.0.1:80->80/tcp (no 0.0.0.0 binds)
+
+# 3) Confirm the origin enforcement network exists and has the pinned gateway
+sudo docker network inspect hosting-caddy-origin --format '{{(index .IPAM.Config 0).Gateway}}'
+
+# Expected: 10.250.0.1
+```
+
+**Fix:**
+```bash
+# Create networks (includes hosting-caddy-origin)
+sudo ./scripts/create-networks.sh
+
+# Restart reverse proxy
+cd /srv/infrastructure/reverse-proxy
+sudo docker compose up -d
+
+# If you intentionally changed the gateway/subnet, update infra/reverse-proxy/Caddyfile (tunnel_only)
+# then reload:
+sudo ./scripts/update-caddy.sh /srv/infrastructure/reverse-proxy
+```
+
+**Note:** This blueprint assumes `cloudflared` runs as a systemd service on the VM. If you run `cloudflared` inside Docker, you must adjust `tunnel_only` allowlists or migrate to the systemd service model.
+
 ### Symptom: SSL Certificate Error
 
 **Cause:** Cloudflare SSL misconfigured
 
 **Check:**
 1. Cloudflare Dashboard → SSL/TLS → Overview
-2. Encryption mode should be: **Flexible**
+2. Encryption mode should be: **Full**
 3. Always Use HTTPS: **On**
 
 **Solution:**
@@ -121,13 +159,13 @@ deploy:
 **Diagnosis:**
 ```bash
 # Check restart count
-docker ps -a --format "table {{.Names}}\t{{.Status}}"
+sudo docker ps -a --format "table {{.Names}}\t{{.Status}}"
 
 # View logs
-docker compose logs --tail=200
+sudo docker compose logs --tail=200
 
 # Check health
-docker inspect app-staging | grep -A 20 Health
+sudo docker inspect app-staging | grep -A 20 Health
 ```
 
 **Common Causes:**
@@ -135,14 +173,14 @@ docker inspect app-staging | grep -A 20 Health
 **1. Failed Health Check**
 ```bash
 # Test health endpoint manually
-docker compose exec app curl http://localhost:3000/health
+sudo docker compose exec app curl http://localhost:3000/health
 
 # Fix: Update health check path or fix endpoint
 ```
 
 **2. Out of Memory**
 ```bash
-docker stats
+sudo docker stats
 
 # Fix: Increase memory limit in compose.yml
 ```
@@ -161,9 +199,9 @@ nano .env
 
 **Diagnosis:**
 ```bash
-docker compose logs app
-docker compose ps -a
-docker inspect app-staging
+sudo docker compose logs app
+sudo docker compose ps -a
+sudo docker inspect app-staging
 ```
 
 **Common Causes:**
@@ -194,7 +232,7 @@ sudo chown -R $(whoami):$(whoami) ./data
 # Error: "network not found"
 
 # Create networks
-./scripts/create-networks.sh
+sudo ./scripts/create-networks.sh
 ```
 
 ---
@@ -227,7 +265,7 @@ sudo systemctl restart cloudflared
 **2. Credentials File Missing**
 ```bash
 # Check if file exists
-ls -la /root/.cloudflared/*.json
+sudo ls -la /etc/cloudflared/*.json
 
 # Fix: Re-create tunnel or copy credentials
 ```
@@ -292,6 +330,14 @@ ssh -o ProxyCommand="cloudflared access ssh --hostname ssh.yourdomain.com" sysad
 
 **Method 2: SSH config** (recommended):
 
+Quick setup (recommended):
+```bash
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+
+# Default alias is the first label of your domain:
+ssh yourdomain
+```
+
 Edit `~/.ssh/config`:
 ```
 Host myserver
@@ -310,17 +356,13 @@ Then use: `ssh myserver`
 **On LOCAL machine** (not server):
 
 ```bash
-# Debian/Ubuntu
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
-sudo dpkg -i cloudflared.deb
+# Recommended (installs cloudflared + configures SSH for tunnel access)
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
 
-# macOS
-brew install cloudflared
-
-# Other Linux
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
-chmod +x cloudflared
-sudo mv cloudflared /usr/local/bin/
+# Manual install (if you prefer)
+# macOS: brew install cloudflared
+# Debian/Ubuntu: install via https://pkg.cloudflare.com/cloudflared
+# Other Linux: use Cloudflare’s official releases (verify source)
 ```
 
 **Verify**:
@@ -447,12 +489,12 @@ ssh -v myserver
 
 **1. cloudflared Not Installed Locally**
 ```bash
-# Install on workstation
-# macOS:
-brew install cloudflared
+# Recommended (installs cloudflared + configures SSH)
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
 
-# Linux:
-wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+# Manual:
+# macOS: brew install cloudflared
+# Debian/Ubuntu: install via https://pkg.cloudflare.com/cloudflared
 ```
 
 **2. SSH Config Wrong**
@@ -484,13 +526,13 @@ ingress:
 **Diagnosis:**
 ```bash
 # Find memory hogs
-docker stats --no-stream | sort -k4 -h
+sudo docker stats --no-stream | sort -k4 -h
 ```
 
 **Solutions:**
 ```bash
 # 1. Restart container
-docker compose restart app
+sudo docker compose restart app
 
 # 2. Reduce memory limit (forces container to use less)
 # In compose.yml:
@@ -507,30 +549,30 @@ deploy:
 **Diagnosis:**
 ```bash
 df -h
-docker system df -v
+sudo docker system df -v
 du -sh /var/lib/docker/*
 ```
 
 **Solutions:**
 ```bash
 # Clean unused resources
-docker system prune -a --volumes
+sudo docker system prune -a --volumes
 # WARNING: Removes ALL unused containers, images, volumes
 
 # Safer: Clean selectively
-docker image prune -a  # Unused images only
-docker volume prune    # Unused volumes only
+sudo docker image prune -a  # Unused images only
+sudo docker volume prune    # Unused volumes only
 
 # Check specific volumes
-docker volume ls
-docker volume rm <volume_name>
+sudo docker volume ls
+sudo docker volume rm <volume_name>
 ```
 
 ### Build Failures
 
 **Diagnosis:**
 ```bash
-docker compose build
+sudo docker compose build
 # Look for error messages
 ```
 
@@ -545,7 +587,7 @@ docker compose build
 **2. npm install Fails**
 ```bash
 # Clear npm cache
-docker compose build --no-cache
+sudo docker compose build --no-cache
 ```
 
 **3. Permission Denied**
@@ -566,8 +608,8 @@ chmod 644 Dockerfile
 **Diagnosis:**
 ```bash
 cd infra/reverse-proxy
-docker compose logs caddy
-docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile
+sudo docker compose logs caddy
+sudo docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile
 ```
 
 **Common Issues:**
@@ -575,10 +617,10 @@ docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile
 **1. Caddyfile Syntax Error**
 ```bash
 # Test config
-docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile
+sudo docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile
 
 # Fix syntax and restart
-docker compose restart caddy
+sudo docker compose restart caddy
 ```
 
 **2. Port 80 Already in Use**
@@ -595,22 +637,22 @@ sudo systemctl stop apache2
 **Check:**
 ```bash
 # View Caddy logs
-docker compose logs caddy --tail=100
+sudo docker compose logs caddy --tail=100
 
 # Test if Caddy can reach app
-docker compose exec caddy wget -O- http://app-staging:80
+sudo docker compose exec caddy wget -O- http://app-staging:80
 ```
 
 **Solutions:**
 ```bash
 # 1. Verify app is on correct network
-docker inspect app-staging | grep NetworkMode
+sudo docker inspect app-staging | grep NetworkMode
 
 # 2. Update Caddyfile
 nano Caddyfile
 
 # 3. Restart Caddy
-docker compose restart caddy
+sudo docker compose restart caddy
 ```
 
 ---
@@ -625,10 +667,10 @@ docker compose restart caddy
 time curl https://staging-app.yourdomain.com
 
 # Check app metrics
-docker stats app-staging
+sudo docker stats app-staging
 
 # Check Caddy logs for slow requests
-docker compose exec caddy tail -f /data/logs/staging-access.log
+sudo docker compose exec caddy tail -f /data/logs/staging-access.log
 ```
 
 **Solutions:**
@@ -641,7 +683,7 @@ docker compose exec caddy tail -f /data/logs/staging-access.log
 
 **Find culprit:**
 ```bash
-docker stats --no-stream | sort -k3 -h
+sudo docker stats --no-stream | sort -k3 -h
 ```
 
 **Solutions:**
@@ -667,11 +709,11 @@ sudo systemctl restart cloudflared
 
 # 2. Check Caddy
 cd infra/reverse-proxy
-docker compose restart
+sudo docker compose restart
 
 # 3. Check all apps
-docker ps -a
-docker compose up -d  # In each app directory
+sudo docker ps -a
+sudo docker compose up -d  # In each app directory
 
 # 4. Check firewall
 sudo ufw status
@@ -688,7 +730,7 @@ sudo ufw deny from <ip-address>
 sudo journalctl --since "1 hour ago" | grep <ip-address>
 
 # 3. Check for unauthorized containers
-docker ps -a
+sudo docker ps -a
 
 # 4. Rotate all secrets
 # Update .env files in all apps
@@ -720,7 +762,7 @@ loglevel: debug
 
 **Docker:**
 ```bash
-docker compose logs -f --tail=500
+sudo docker compose logs -f --tail=500
 ```
 
 ### Collect Diagnostic Info
@@ -734,9 +776,9 @@ free -h
 
 # Docker info
 docker --version
-docker compose version
-docker ps -a
-docker network ls
+sudo docker compose version
+sudo docker ps -a
+sudo docker network ls
 
 # Service status
 sudo systemctl status cloudflared
@@ -745,7 +787,7 @@ sudo ufw status verbose
 
 # Logs
 sudo journalctl -u cloudflared --since "1 hour ago" > tunnel.log
-docker compose logs > app.log
+sudo docker compose logs > app.log
 ```
 
 ---
@@ -759,7 +801,7 @@ docker compose logs > app.log
 **Fix:** Change port or stop conflicting service
 
 ### "network not found"
-**Fix:** Run `./scripts/create-networks.sh`
+**Fix:** Run `sudo ./scripts/create-networks.sh`
 
 ### "no such file or directory"
 **Fix:** Create missing directories or fix volume mounts

@@ -205,7 +205,7 @@ main() {
     print_error "Please test SSH via tunnel before proceeding"
     echo ""
     echo "Setup instructions:"
-    echo "  curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.$DOMAIN sysadmin"
+    echo "  curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.$DOMAIN sysadmin"
     exit 1
   fi
 
@@ -280,29 +280,34 @@ main() {
   fi
 
   # =================================================================
-  # Step 4: Allow Cloudflare IPs Only
+  # Step 4: Close Web Ports (Tunnel-only)
   # =================================================================
-  print_header "Step 4/6: Configure Firewall for Cloudflare Only"
+  print_header "Step 4/6: Close Web Ports (Tunnel-only)"
 
-  print_step "Downloading Cloudflare IP ranges..."
+  print_step "Ensuring ports 80/443 are not exposed..."
 
-  # Get Cloudflare IPs
-  curl -s https://www.cloudflare.com/ips-v4 -o /tmp/cf_ips_v4
-  curl -s https://www.cloudflare.com/ips-v6 -o /tmp/cf_ips_v6
+  # Remove common allow/limit rules (best-effort)
+  printf "y\n" | ufw delete allow 80/tcp >/dev/null 2>&1 || true
+  printf "y\n" | ufw delete allow 80 >/dev/null 2>&1 || true
+  printf "y\n" | ufw delete limit 80/tcp >/dev/null 2>&1 || true
+  printf "y\n" | ufw delete allow 443/tcp >/dev/null 2>&1 || true
+  printf "y\n" | ufw delete allow 443 >/dev/null 2>&1 || true
+  printf "y\n" | ufw delete limit 443/tcp >/dev/null 2>&1 || true
 
-  print_step "Allowing Cloudflare IPs to web ports (80, 443)..."
+  # Remove any remaining numbered rules for 80/443 (handles ranges like 80,443/tcp)
+  rules_to_delete="$(ufw status numbered 2>/dev/null | awk -F'[][]' '/(ALLOW|LIMIT)/ && ($0 ~ /80\\/tcp/ || $0 ~ /443\\/tcp/ || $0 ~ /80,443\\/tcp/) {print $2}' | sort -rn || true)"
+  if [ -n "${rules_to_delete:-}" ]; then
+    while IFS= read -r rule_num; do
+      [ -z "$rule_num" ] && continue
+      printf "y\n" | ufw delete "$rule_num" >/dev/null 2>&1 || true
+    done <<< "$rules_to_delete"
+  fi
 
-  # Allow Cloudflare IPv4
-  while read -r ip; do
-    ufw allow from "$ip" to any port 80,443 proto tcp comment "Cloudflare" >/dev/null 2>&1 || true
-  done < /tmp/cf_ips_v4
+  # Explicit denies make the intent obvious (default incoming policy is deny anyway)
+  ufw deny 80/tcp comment "HTTP blocked - use Cloudflare Tunnel only" 2>/dev/null || true
+  ufw deny 443/tcp comment "HTTPS blocked - use Cloudflare Tunnel only" 2>/dev/null || true
 
-  # Allow Cloudflare IPv6
-  while read -r ip; do
-    ufw allow from "$ip" to any port 80,443 proto tcp comment "Cloudflare" >/dev/null 2>&1 || true
-  done < /tmp/cf_ips_v6
-
-  print_success "Firewall configured to allow only Cloudflare IPs"
+  print_success "Ports 80/443 are blocked (tunnel-only)"
 
   # =================================================================
   # Step 5: Final Confirmation Before Lockdown
@@ -353,17 +358,17 @@ main() {
 
   # Remove any existing allow rules for port 22
   if ufw status | grep -q "OpenSSH"; then
-    ufw delete allow OpenSSH 2>/dev/null || true
+    printf "y\n" | ufw delete allow OpenSSH >/dev/null 2>&1 || true
     print_info "Removed OpenSSH rule"
   fi
 
   if ufw status | grep -q "22/tcp"; then
-    ufw delete allow 22/tcp 2>/dev/null || true
+    printf "y\n" | ufw delete allow 22/tcp >/dev/null 2>&1 || true
     print_info "Removed port 22/tcp allow rule"
   fi
 
   if ufw status | grep -q " 22 "; then
-    ufw delete allow 22 2>/dev/null || true
+    printf "y\n" | ufw delete allow 22 >/dev/null 2>&1 || true
     print_info "Removed port 22 allow rule"
   fi
 
@@ -387,6 +392,58 @@ main() {
     echo "Current firewall rules:"
     ufw status numbered
   fi
+
+  # Optional: bind sshd to loopback only (defense-in-depth).
+  # This makes SSH unreachable from the public interface even if firewall rules are changed later.
+  print_header "Optional: SSH Loopback-Only Hardening"
+
+  echo "For a tunnel-only threat model, it's safest to make SSH listen on localhost only."
+  echo "This prevents accidental exposure if firewall rules are changed."
+  echo ""
+  echo "This will write:"
+  echo "  /etc/ssh/sshd_config.d/10-tunnel-only-listen.conf"
+  echo "with:"
+  echo "  ListenAddress 127.0.0.1"
+  echo "  ListenAddress ::1"
+  echo ""
+
+  if confirm "Restrict sshd to loopback only? (recommended)" "y"; then
+    print_step "Writing sshd listen config..."
+    LISTEN_CONF="/etc/ssh/sshd_config.d/10-tunnel-only-listen.conf"
+    cat > "$LISTEN_CONF" <<'EOF'
+# Managed by hosting-blueprint (tunnel-only hardening)
+ListenAddress 127.0.0.1
+ListenAddress ::1
+EOF
+    chmod 644 "$LISTEN_CONF"
+
+    print_step "Validating SSH config..."
+    if sshd -t; then
+      print_success "SSH config valid"
+      print_step "Reloading SSH service..."
+      systemctl reload ssh >/dev/null 2>&1 || systemctl reload sshd >/dev/null 2>&1 || systemctl restart ssh >/dev/null 2>&1 || systemctl restart sshd >/dev/null 2>&1 || true
+      print_success "SSH service reloaded"
+    else
+      print_error "sshd -t failed after adding listen config. Rolling back."
+      rm -f "$LISTEN_CONF" 2>/dev/null || true
+      sshd -t >/dev/null 2>&1 || true
+    fi
+  else
+    print_info "Skipped sshd loopback-only binding"
+  fi
+
+  # Persist tunnel-only posture so re-running setup scripts won't re-open SSH.
+  print_step "Recording tunnel-only posture..."
+  install -d -m 0755 /etc/hosting-blueprint
+  cat > /etc/hosting-blueprint/tunnel-only.enabled <<EOF
+# Managed by hosting-blueprint (tunnel-only posture)
+# This file is used by setup scripts to avoid re-opening direct SSH access.
+enabled_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+domain=${DOMAIN}
+tunnel_id=${TUNNEL_ID}
+EOF
+  chmod 0644 /etc/hosting-blueprint/tunnel-only.enabled
+  print_success "Tunnel-only marker written: /etc/hosting-blueprint/tunnel-only.enabled"
 
   # =================================================================
   # Final Verification
@@ -432,33 +489,192 @@ main() {
 # Cloudflare API Functions
 # =================================================================
 
+cf_name_to_fqdn() {
+  local name="$1"
+
+  # Cloudflare UI shorthand:
+  # - "@" means zone apex
+  # - "*" means wildcard
+  if [ "$name" = "@" ]; then
+    echo "$DOMAIN"
+    return 0
+  fi
+  if [ "$name" = "*" ]; then
+    echo "*.$DOMAIN"
+    return 0
+  fi
+
+  # If caller passes an FQDN, keep it.
+  if [[ "$name" == *"."* ]]; then
+    echo "$name"
+    return 0
+  fi
+
+  echo "$name.$DOMAIN"
+}
+
 add_cname_record() {
   local zone_id="$1"
   local token="$2"
   local name="$3"
   local target="$4"
 
-  # Check if record already exists
-  local existing=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records?type=CNAME&name=$name" \
-    -H "Authorization: Bearer $token" \
-    -H "Content-Type: application/json")
+  local fqdn
+  fqdn="$(cf_name_to_fqdn "$name")"
 
-  if echo "$existing" | grep -q "\"count\":0"; then
-    # Create new CNAME record
-    local response=$(curl -s -X POST "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records" \
+  # Get existing CNAME record for this name (if any).
+  local existing
+  existing="$(curl -sS -G "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records" \
+    -H "Authorization: Bearer $token" \
+    -H "Content-Type: application/json" \
+    --data-urlencode "type=CNAME" \
+    --data-urlencode "name=$fqdn")"
+
+  local cname_info=""
+  cname_info="$(echo "$existing" | python3 - <<'PY'
+import sys, json
+data = json.load(sys.stdin)
+if not data.get("success"):
+    for e in (data.get("errors") or []):
+        msg = e.get("message")
+        if msg:
+            print(msg, file=sys.stderr)
+    sys.exit(2)
+res = data.get("result") or []
+if not res:
+    sys.exit(0)
+r = res[0]
+print(f"{r.get('id','')}|{r.get('content','')}|{str(r.get('proxied', ''))}")
+PY
+  )" || {
+    print_error "Cloudflare API error while checking existing CNAME: $fqdn"
+    return 1
+  }
+
+  local cname_id="" cname_content="" cname_proxied=""
+  if [ -n "$cname_info" ]; then
+    IFS='|' read -r cname_id cname_content cname_proxied <<< "$cname_info"
+  fi
+
+  # Update if exists but differs (idempotent reconciliation).
+  if [ -n "$cname_id" ]; then
+    local proxied_lc
+    proxied_lc="$(echo "$cname_proxied" | tr '[:upper:]' '[:lower:]' || true)"
+    if [ "$cname_content" = "$target" ] && [ "$proxied_lc" = "true" ]; then
+      print_info "CNAME already correct: $fqdn → $target"
+      return 0
+    fi
+
+    print_step "Updating CNAME: $fqdn → $target"
+    local update
+    update="$(curl -sS -X PUT "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records/$cname_id" \
       -H "Authorization: Bearer $token" \
       -H "Content-Type: application/json" \
-      --data "{\"type\":\"CNAME\",\"name\":\"$name\",\"content\":\"$target\",\"proxied\":true}")
-
-    if echo "$response" | grep -q '"success":true'; then
-      print_success "Added CNAME: $name → $target"
-    else
-      print_error "Failed to add CNAME: $name"
-      echo "$response" | grep -oP '"message":"\K[^"]+' || echo "$response"
+      --data "{\"type\":\"CNAME\",\"name\":\"$fqdn\",\"content\":\"$target\",\"proxied\":true}")"
+    if echo "$update" | grep -q '"success":true'; then
+      print_success "Updated CNAME: $fqdn → $target"
+      return 0
     fi
-  else
-    print_info "CNAME already exists: $name"
+
+    print_error "Failed to update CNAME: $fqdn"
+    echo "$update" | grep -oP '"message":"\K[^"]+' || echo "$update"
+    return 1
   fi
+
+  # No existing CNAME: create it.
+  print_step "Creating CNAME: $fqdn → $target"
+  local response
+  response="$(curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records" \
+    -H "Authorization: Bearer $token" \
+    -H "Content-Type: application/json" \
+    --data "{\"type\":\"CNAME\",\"name\":\"$fqdn\",\"content\":\"$target\",\"proxied\":true}")"
+
+  if echo "$response" | grep -q '"success":true'; then
+    print_success "Added CNAME: $fqdn → $target"
+    return 0
+  fi
+
+  # If creation failed, it may be because an A/AAAA record exists with the same name.
+  # Try to delete A/AAAA records pointing to this VM IP, then retry once.
+  print_warning "CNAME creation failed for $fqdn. Checking for conflicting A/AAAA records..."
+
+  local all
+  all="$(curl -sS -G "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records" \
+    -H "Authorization: Bearer $token" \
+    -H "Content-Type: application/json" \
+    --data-urlencode "name=$fqdn")"
+
+  local vm_ip=""
+  vm_ip="$(detect_vm_ip || true)"
+
+  local conflicts=""
+  conflicts="$(echo "$all" | python3 - <<'PY'
+import sys, json
+data = json.load(sys.stdin)
+if not data.get("success"):
+    sys.exit(2)
+for r in (data.get("result") or []):
+    t = r.get("type")
+    if t in ("A", "AAAA"):
+        print(f"{r.get('id','')}|{t}|{r.get('name','')}|{r.get('content','')}")
+PY
+  )" || true
+
+  if [ -z "$conflicts" ]; then
+    print_error "Failed to create CNAME for $fqdn"
+    echo "$response" | grep -oP '"message":"\K[^"]+' || echo "$response"
+    return 1
+  fi
+
+  if [ -z "$vm_ip" ]; then
+    print_error "Cannot safely resolve CNAME conflict for $fqdn (VM public IP unknown)"
+    echo "$response" | grep -oP '"message":"\K[^"]+' || echo "$response"
+    return 1
+  fi
+
+  # Delete only A/AAAA records that point to this VM.
+  deleted_any=false
+  while IFS='|' read -r rec_id rec_type rec_name rec_content; do
+    [ -z "$rec_id" ] && continue
+    if [ "$rec_content" != "$vm_ip" ]; then
+      print_error "Conflicting $rec_type record exists for $fqdn pointing to $rec_content (not this VM: $vm_ip)"
+      print_error "Resolve DNS conflicts in Cloudflare, then re-run finalize."
+      return 1
+    fi
+
+    print_info "Deleting conflicting $rec_type record: $rec_name → $rec_content"
+    local del_resp
+    del_resp="$(curl -sS -X DELETE "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records/$rec_id" \
+      -H "Authorization: Bearer $token" \
+      -H "Content-Type: application/json")"
+    if echo "$del_resp" | grep -q '"success":true'; then
+      deleted_any=true
+    else
+      print_error "Failed to delete conflicting $rec_type record for $fqdn"
+      echo "$del_resp" | grep -oP '"message":"\K[^"]+' || echo "$del_resp"
+      return 1
+    fi
+  done <<< "$conflicts"
+
+  if [ "$deleted_any" != "true" ]; then
+    print_error "No conflicting A/AAAA records were deleted for $fqdn"
+    return 1
+  fi
+
+  print_step "Retrying CNAME creation: $fqdn → $target"
+  response="$(curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records" \
+    -H "Authorization: Bearer $token" \
+    -H "Content-Type: application/json" \
+    --data "{\"type\":\"CNAME\",\"name\":\"$fqdn\",\"content\":\"$target\",\"proxied\":true}")"
+
+  if echo "$response" | grep -q '"success":true'; then
+    print_success "Added CNAME: $fqdn → $target"
+    return 0
+  fi
+
+  print_error "Failed to create CNAME after conflict resolution: $fqdn"
+  echo "$response" | grep -oP '"message":"\K[^"]+' || echo "$response"
+  return 1
 }
 
 detect_vm_ip() {

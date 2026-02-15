@@ -11,6 +11,12 @@ credentials.json
 .cloudflared/
 
 # Environment files with secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+!.env.enc
+!.env.*.enc
 .env.local
 .env.*.local
 
@@ -61,3 +67,6 @@ Thumbs.db
 
 # Plan files (local only)
 .claude/
+
+# Local GitHub account override (gh-account-switcher)
+.gh-account

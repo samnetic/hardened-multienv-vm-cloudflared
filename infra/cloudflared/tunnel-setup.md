@@ -95,7 +95,7 @@ sudo nano /etc/cloudflared/config.yml
 
 ```yaml
 tunnel: a9ae4e2e-f936-47a8-b3ec-aadcef3c50d0
-credentials-file: /root/.cloudflared/a9ae4e2e-f936-47a8-b3ec-aadcef3c50d0.json
+credentials-file: /etc/cloudflared/a9ae4e2e-f936-47a8-b3ec-aadcef3c50d0.json
 
 ingress:
   - hostname: ssh.trenkwalder.digital
@@ -196,9 +196,9 @@ sudo journalctl -u cloudflared -f
 
 Go to: `SSL/TLS` → `Overview`
 
-**Set encryption mode: Flexible**
-- ✅ Flexible: Cloudflare → Origin (HTTP)
-- Why: Tunnel is encrypted, but Caddy runs HTTP
+**Set encryption mode: Full**
+- Recommended default (avoids "Flexible" downgrade footguns)
+- Cloudflare Tunnel is encrypted; Caddy can still run HTTP on `localhost:80`
 
 **Enable these:**
 - ✅ TLS 1.3
@@ -281,6 +281,17 @@ chmod +x cloudflared
 sudo mv cloudflared /usr/local/bin/
 ```
 
+#### Quick Setup Script (Recommended)
+
+This blueprint ships a helper that installs `cloudflared` (if needed) and writes `~/.ssh/config` for you:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+
+# Default alias is the first label of your domain:
+ssh yourdomain
+```
+
 #### Configure SSH Config (ESSENTIAL)
 
 Edit `~/.ssh/config`:
@@ -342,19 +353,17 @@ Without SSH config, you'd need to type the full ProxyCommand every time!
 
 ## 9. Firewall Configuration
 
-Now that tunnel is working, lock down the firewall:
+Now that tunnel is working, lock down inbound ports (tunnel-only):
 
 ```bash
-# Get Cloudflare IP ranges
-curl -s https://www.cloudflare.com/ips-v4 -o /tmp/cf_ips_v4
-curl -s https://www.cloudflare.com/ips-v6 -o /tmp/cf_ips_v6
-
-# Allow only Cloudflare IPs to web ports
-while read ip; do sudo ufw allow from $ip to any port 80,443 proto tcp; done < /tmp/cf_ips_v4
-while read ip; do sudo ufw allow from $ip to any port 80,443 proto tcp; done < /tmp/cf_ips_v6
+# With Cloudflare Tunnel you do NOT need inbound 80/443 at all.
+# All HTTP traffic arrives over the tunnel to localhost.
+sudo ufw deny 80/tcp
+sudo ufw deny 443/tcp
 
 # CRITICAL: Remove SSH from public internet (tunnel handles it now)
 sudo ufw delete allow OpenSSH
+sudo ufw deny 22/tcp
 
 # Verify - port 22 should NOT be open
 sudo ufw status verbose
@@ -402,8 +411,8 @@ cloudflared --version
 
 ### 502 Bad Gateway
 
-- Check if Caddy is running: `docker compose ps`
-- Check Caddy logs: `docker compose logs caddy`
+- Check if Caddy is running: `sudo docker compose ps`
+- Check Caddy logs: `sudo docker compose logs caddy`
 - Verify tunnel points to `http://localhost:80`
 
 ---

@@ -60,6 +60,30 @@
 -w /var/run/docker.sock -p rwxa -k docker_socket
 
 # ===========================================
+# CLOUDFLARED / TUNNEL MONITORING
+# ===========================================
+
+# Monitor cloudflared config and credentials
+-w /etc/cloudflared/ -p wa -k cloudflared_config
+
+# ===========================================
+# SECRETS MONITORING
+# ===========================================
+
+# Monitor secrets directory changes (writes only)
+-w /var/secrets/ -p wa -k secrets_changes
+
+# Monitor SOPS config / age keys (if used)
+-w /etc/sops/ -p wa -k sops_changes
+
+# ===========================================
+# SYSTEMD MONITORING
+# ===========================================
+
+# Monitor systemd unit changes
+-w /etc/systemd/ -p wa -k systemd_changes
+
+# ===========================================
 # LOGIN/LOGOUT MONITORING
 # ===========================================
 

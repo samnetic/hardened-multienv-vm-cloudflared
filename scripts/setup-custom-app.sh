@@ -64,6 +64,21 @@ print_info() {
   echo -e "${BLUE}ℹ $1${NC}"
 }
 
+# Prefer a security-first model: humans are not in the docker group.
+# If docker isn't directly accessible, fall back to sudo.
+DOCKER=(docker)
+if ! command -v docker >/dev/null 2>&1; then
+  print_error "Docker is not installed"
+  exit 1
+fi
+if ! docker info >/dev/null 2>&1; then
+  DOCKER=(sudo docker)
+fi
+
+compose() {
+  "${DOCKER[@]}" compose "$@"
+}
+
 # =================================================================
 # Parse Arguments
 # =================================================================
@@ -195,11 +210,11 @@ setup_app() {
   # =================================================================
   print_header "Step 2/4: Configure Environment"
 
-  # Check for docker-compose.yml
-  if [ ! -f "docker-compose.yml" ] && [ ! -f "compose.yml" ]; then
-    print_error "No docker-compose.yml or compose.yml found"
+  # Check for compose file
+  if [ ! -f "docker-compose.yml" ] && [ ! -f "docker-compose.yaml" ] && [ ! -f "compose.yml" ] && [ ! -f "compose.yaml" ]; then
+    print_error "No compose file found (expected compose.yaml/compose.yml or docker-compose.yaml/docker-compose.yml)"
     echo ""
-    echo "Your custom app repository needs a docker-compose.yml file."
+    echo "Your custom app repository needs a compose file."
     echo ""
     echo "Example docker-compose.yml:"
     echo ""
@@ -263,24 +278,24 @@ EOF
   print_header "Step 3/4: Build and Start Application"
 
   print_step "Building Docker images..."
-  docker compose build
+  compose build
 
   print_step "Starting containers..."
-  docker compose up -d
+  compose up -d
 
   sleep 3
 
   print_step "Checking container status..."
-  if docker compose ps --services --filter "status=running" | grep -q .; then
+  if compose ps --services --filter "status=running" | grep -q .; then
     print_success "Application is running"
     echo ""
-    docker compose ps
+    compose ps
   else
     print_error "Application failed to start"
     echo ""
     print_info "Check logs:"
     echo "  cd $deploy_path"
-    echo "  docker compose logs -f"
+    echo "  sudo docker compose logs -f"
     exit 1
   fi
 
@@ -292,43 +307,50 @@ EOF
   echo ""
   echo "Add this route to your Caddyfile:"
   echo ""
-  echo -e "${CYAN}# In /opt/infrastructure/infra/reverse-proxy/Caddyfile${NC}"
+  echo -e "${CYAN}# In /srv/infrastructure/reverse-proxy/Caddyfile${NC}"
   echo ""
 
-  # Detect container name and port
-  local container_name=$(docker compose ps --format json 2>/dev/null | grep -oP '"Name":"\K[^"]+' | head -1)
-  local exposed_port=$(docker compose ps --format json 2>/dev/null | grep -oP '"Publishers":\[\{"URL":"","TargetPort":\K[0-9]+' | head -1)
-
-  if [ -z "$exposed_port" ]; then
-    exposed_port="3000"  # Default guess
-    print_warning "Port detection failed - using default port $exposed_port"
+  # Pick a reasonable default upstream service (prefer "app" if present).
+  # In tunnel-only mode, apps SHOULD NOT publish ports. Caddy routes to the
+  # container's internal port on the shared Docker network.
+  local upstream_service="app"
+  local services_list
+  services_list="$(compose ps --services 2>/dev/null || true)"
+  if ! echo "$services_list" | tr -d '\r' | grep -qx "app"; then
+    upstream_service="$(echo "$services_list" | head -1 | tr -d '\r' || true)"
+  fi
+  if [ -z "${upstream_service:-}" ]; then
+    upstream_service="app"
   fi
 
+  local upstream_port="3000"
+  echo ""
+  read -rp "Internal port your app listens on (e.g., 3000) [${upstream_port}]: " upstream_port_in
+  upstream_port="${upstream_port_in:-$upstream_port}"
+
   echo -e "${BOLD}http://${SUBDOMAIN}.\${DOMAIN} {${NC}"
-  echo -e "${BOLD}    reverse_proxy ${container_name}:${exposed_port}${NC}"
+  echo -e "${BOLD}    reverse_proxy ${upstream_service}:${upstream_port}${NC}"
   echo -e "${BOLD}}${NC}"
 
   echo ""
   echo "Then reload Caddy:"
   echo ""
-  echo "  cd /opt/infrastructure/infra/reverse-proxy"
-  echo "  docker compose restart"
+  echo "  sudo /opt/hosting-blueprint/scripts/update-caddy.sh /srv/infrastructure/reverse-proxy"
   echo ""
 
   read -rp "Open Caddyfile in editor now? (yes/no): " open_caddy
   if [ "$open_caddy" = "yes" ]; then
-    if [ -f "/opt/infrastructure/infra/reverse-proxy/Caddyfile" ]; then
-      nano /opt/infrastructure/infra/reverse-proxy/Caddyfile
+    if [ -f "/srv/infrastructure/reverse-proxy/Caddyfile" ]; then
+      nano /srv/infrastructure/reverse-proxy/Caddyfile
       echo ""
       read -rp "Reload Caddy now? (yes/no): " reload_caddy
       if [ "$reload_caddy" = "yes" ]; then
-        cd /opt/infrastructure/infra/reverse-proxy
-        docker compose restart
+        sudo /opt/hosting-blueprint/scripts/update-caddy.sh /srv/infrastructure/reverse-proxy
         print_success "Caddy reloaded"
       fi
     else
-      print_warning "Caddyfile not found at /opt/infrastructure/infra/reverse-proxy/Caddyfile"
-      print_info "Edit manually after setting up infrastructure repository"
+      print_warning "Caddyfile not found at /srv/infrastructure/reverse-proxy/Caddyfile"
+      print_info "Initialize /srv/infrastructure first (see scripts/setup-infrastructure-repo.sh)"
     fi
   fi
 }
@@ -352,16 +374,16 @@ show_summary() {
   echo ""
   echo "  # View logs"
   echo "  cd /srv/apps/$ENVIRONMENT/$APP_NAME"
-  echo "  docker compose logs -f"
+  echo "  sudo docker compose logs -f"
   echo ""
   echo "  # Restart application"
-  echo "  docker compose restart"
+  echo "  sudo docker compose restart"
   echo ""
   echo "  # Update from git"
-  echo "  git pull && docker compose up -d --build"
+  echo "  git pull && sudo docker compose up -d --build"
   echo ""
   echo "  # Stop application"
-  echo "  docker compose down"
+  echo "  sudo docker compose down"
   echo ""
   echo -e "${CYAN}CI/CD Integration:${NC}"
   echo ""

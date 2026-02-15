@@ -27,8 +27,8 @@ Feature requests are welcome! Please create an issue with:
 
 1. **Fork the repository**
    ```bash
-   gh repo fork samnetic/hardened-multienv-vm --clone
-   cd hardened-multienv-vm
+   gh repo fork samnetic/hardened-multienv-vm-cloudflared --clone
+   cd hardened-multienv-vm-cloudflared
    ```
 
 2. **Create a feature branch**
@@ -88,7 +88,7 @@ curl -fsSL http://your-test-server/bootstrap.sh | sudo bash
 # Create test VM on cloud provider
 # SSH to VM
 # Clone your fork and run setup
-git clone https://github.com/YOUR_USERNAME/hardened-multienv-vm.git /opt/hosting-blueprint
+git clone https://github.com/YOUR_USERNAME/hardened-multienv-vm-cloudflared.git /opt/hosting-blueprint
 cd /opt/hosting-blueprint
 sudo ./setup.sh
 ```

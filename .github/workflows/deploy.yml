@@ -32,6 +32,10 @@ on:
         required: true
         type: string
 
+# Least-privilege default token permissions
+permissions:
+  contents: read
+
 # Cancel in-progress runs for the same branch
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -45,25 +49,27 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       environment: ${{ steps.set-env.outputs.env }}
-      deploy_path: ${{ steps.set-env.outputs.deploy_path }}
+      deploy_ref: ${{ steps.set-env.outputs.deploy_ref }}
     steps:
       - name: Determine target environment
         id: set-env
         run: |
+          set -euo pipefail
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "env=production" >> $GITHUB_OUTPUT
-            echo "deploy_path=/srv/apps/production" >> $GITHUB_OUTPUT
+            echo "deploy_ref=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             echo "env=staging" >> $GITHUB_OUTPUT
-            echo "deploy_path=/srv/apps/staging" >> $GITHUB_OUTPUT
+            echo "deploy_ref=${{ github.sha }}" >> $GITHUB_OUTPUT
           else
             echo "env=dev" >> $GITHUB_OUTPUT
-            echo "deploy_path=/srv/apps/dev" >> $GITHUB_OUTPUT
+            echo "deploy_ref=${{ github.sha }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Validate production confirmation
         if: github.event_name == 'workflow_dispatch'
         run: |
+          set -euo pipefail
           if [[ "${{ github.event.inputs.confirm }}" != "DEPLOY" ]]; then
             echo "::error::Production deployment requires typing 'DEPLOY' to confirm"
             exit 1
@@ -81,141 +87,74 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          # For production, checkout the specified tag
-          ref: ${{ github.event.inputs.version || github.ref }}
+          # For production, checkout the specified tag. For pushes, deploy the triggering commit SHA.
+          ref: ${{ needs.determine-environment.outputs.deploy_ref }}
+          fetch-depth: 0
 
       # =================================================================
       # Install cloudflared for SSH tunneling
       # =================================================================
       - name: Install cloudflared
         run: |
-          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-          sudo dpkg -i cloudflared-linux-amd64.deb
+          set -euo pipefail
+          sudo mkdir -p --mode=0755 /usr/share/keyrings
+          curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+          echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y cloudflared
+          cloudflared --version
 
       # =================================================================
       # Configure SSH with Cloudflare Access Service Token
       # =================================================================
       - name: Configure SSH
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+
+          # Pin server host keys to prevent MITM.
+          # Generate on the server with: ./scripts/ssh/print-known-hosts.sh ssh.yourdomain.com
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
 
           cat > ~/.ssh/config << EOF
           Host ${{ secrets.SSH_HOST }}
             ProxyCommand cloudflared access ssh --service-token-id ${{ secrets.CF_SERVICE_TOKEN_ID }} --service-token-secret ${{ secrets.CF_SERVICE_TOKEN_SECRET }} --hostname %h
             IdentityFile ~/.ssh/deploy_key
             User ${{ secrets.SSH_USER }}
-            StrictHostKeyChecking no
-            UserKnownHostsFile /dev/null
+            StrictHostKeyChecking yes
+            UserKnownHostsFile ~/.ssh/known_hosts
+            RequestTTY no
           EOF
 
           chmod 600 ~/.ssh/config
 
       # =================================================================
-      # Pre-Deploy Validation
+      # Sync (Git Archive) and Deploy via Restricted CI Interface
       # =================================================================
-      - name: Validate deployment prerequisites
+      - name: Sync deployments repo to server (git archive)
         env:
-          DEPLOY_PATH: ${{ needs.determine-environment.outputs.deploy_path }}
           ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
+          DEPLOY_REF: ${{ needs.determine-environment.outputs.deploy_ref }}
         run: |
-          ssh ${{ secrets.SSH_HOST }} "DEPLOY_PATH='$DEPLOY_PATH' ENVIRONMENT='$ENVIRONMENT' bash -s" << 'ENDSSH'
-            set -e
-
-            echo "=== Validating deployment prerequisites ==="
-
-            # Check if deploy directory exists
-            if [ ! -d "$DEPLOY_PATH" ]; then
-              echo "ERROR: Deployment directory does not exist: $DEPLOY_PATH"
-              echo "Run setup-vm.sh on the server first."
-              exit 1
-            fi
-
-            # Check for compose.yml files
-            COMPOSE_COUNT=$(find "$DEPLOY_PATH" -maxdepth 2 -name "compose.yml" -o -name "docker-compose.yml" 2>/dev/null | wc -l)
-            if [ "$COMPOSE_COUNT" -eq 0 ]; then
-              echo "WARNING: No compose.yml files found in $DEPLOY_PATH"
-              echo "This might be the first deployment."
-            fi
-
-            # Check for required secrets based on compose files
-            echo "Checking for required secrets..."
-            MISSING_SECRETS=0
-            for compose_file in $(find "$DEPLOY_PATH" -maxdepth 2 \( -name "compose.yml" -o -name "docker-compose.yml" \) 2>/dev/null); do
-              APP_DIR=$(dirname "$compose_file")
-              APP_NAME=$(basename "$APP_DIR")
-
-              # Extract secret file references from compose.yml
-              if grep -q "secrets/" "$compose_file" 2>/dev/null; then
-                SECRETS=$(grep -oP 'secrets/[^/]+/[^:]+\.txt' "$compose_file" | sort -u || true)
-                for secret_ref in $SECRETS; do
-                  SECRET_PATH="/opt/hosting-blueprint/$secret_ref"
-                  if [ ! -f "$SECRET_PATH" ]; then
-                    echo "  MISSING: $SECRET_PATH (used by $APP_NAME)"
-                    MISSING_SECRETS=$((MISSING_SECRETS + 1))
-                  fi
-                done
-              fi
-            done
-
-            if [ "$MISSING_SECRETS" -gt 0 ]; then
-              echo ""
-              echo "ERROR: $MISSING_SECRETS required secret(s) missing!"
-              echo "Create secrets with: ./scripts/secrets/create-secret.sh <env> <name>"
-              exit 1
-            fi
-
-            echo "=== Prerequisites validated ==="
-          ENDSSH
+          set -euo pipefail
+          echo "=== Syncing to ${ENVIRONMENT} (ref: ${DEPLOY_REF}) ==="
+          # Ship tracked files only (prevents leaking untracked secrets from the runner workspace).
+          git archive --format=tar "${DEPLOY_REF}" | gzip -c | ssh "${{ secrets.SSH_HOST }}" "hosting sync ${ENVIRONMENT}"
 
       # =================================================================
       # Deploy to Server
       # =================================================================
       - name: Deploy
         env:
-          DEPLOY_PATH: ${{ needs.determine-environment.outputs.deploy_path }}
           ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
-          GIT_REF: ${{ github.ref_name }}
-          GIT_REPO: ${{ github.server_url }}/${{ github.repository }}.git
+          DEPLOY_REF: ${{ needs.determine-environment.outputs.deploy_ref }}
         run: |
-          ssh ${{ secrets.SSH_HOST }} "DEPLOY_PATH='$DEPLOY_PATH' ENVIRONMENT='$ENVIRONMENT' GIT_REF='$GIT_REF' GIT_REPO='$GIT_REPO' bash -s" << 'ENDSSH'
-            set -e
-
-            echo "=== Deploying to $ENVIRONMENT ==="
-            echo "Path: $DEPLOY_PATH"
-
-            # Initialize repo if this is the first deployment
-            if [ ! -d "$DEPLOY_PATH/.git" ]; then
-              echo "First deployment - cloning repository..."
-              mkdir -p "$(dirname "$DEPLOY_PATH")"
-              git clone "$GIT_REPO" "$DEPLOY_PATH"
-            fi
-
-            cd "$DEPLOY_PATH"
-
-            # Pull latest changes
-            echo "Pulling latest changes..."
-            git fetch --all
-            git checkout "$GIT_REF" 2>/dev/null || git checkout -b "$GIT_REF" "origin/$GIT_REF"
-            git reset --hard "origin/$GIT_REF"
-
-            # Find and deploy all apps with compose files
-            echo "Deploying applications..."
-            for compose_file in $(find . -maxdepth 2 -name "compose.yml" -o -name "docker-compose.yml" 2>/dev/null); do
-              APP_DIR=$(dirname "$compose_file")
-              echo "  Deploying: $APP_DIR"
-              cd "$DEPLOY_PATH/$APP_DIR"
-              docker compose pull 2>/dev/null || true
-              docker compose up -d
-            done
-
-            cd "$DEPLOY_PATH"
-
-            # Show status
-            echo "=== Deployment complete ==="
-            docker ps --filter "label=app.environment=$ENVIRONMENT" --format "table {{.Names}}\t{{.Status}}"
-          ENDSSH
+          set -euo pipefail
+          echo "=== Deploying to ${ENVIRONMENT} (ref: ${DEPLOY_REF}) ==="
+          ssh "${{ secrets.SSH_HOST }}" "hosting deploy ${ENVIRONMENT} ${DEPLOY_REF}"
 
       # =================================================================
       # Post-deploy Health Check
@@ -223,25 +162,12 @@ jobs:
       - name: Health check
         if: success()
         env:
-          DEPLOY_PATH: ${{ needs.determine-environment.outputs.deploy_path }}
           ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
         run: |
+          set -euo pipefail
           echo "Waiting for services to start..."
           sleep 10
-
-          ssh ${{ secrets.SSH_HOST }} "DEPLOY_PATH='$DEPLOY_PATH' bash -s" << 'ENDSSH'
-            cd "$DEPLOY_PATH"
-
-            # Check if containers are healthy
-            echo "=== Container Health ==="
-            docker compose ps
-
-            # Check for any unhealthy containers
-            UNHEALTHY=$(docker compose ps --format json | jq -r 'select(.Health == "unhealthy") | .Name' 2>/dev/null || true)
-            if [ -n "$UNHEALTHY" ]; then
-              echo "::warning::Unhealthy containers detected: $UNHEALTHY"
-            fi
-          ENDSSH
+          ssh "${{ secrets.SSH_HOST }}" "hosting status ${ENVIRONMENT}"
 
       # =================================================================
       # Notify on Failure
@@ -261,6 +187,7 @@ jobs:
 # SSH_PRIVATE_KEY      - Ed25519 private key for appmgr user
 # SSH_HOST             - e.g., ssh.yourdomain.com
 # SSH_USER             - e.g., appmgr
+# SSH_KNOWN_HOSTS      - known_hosts entry/entries for SSH_HOST (pin host key)
 # CF_SERVICE_TOKEN_ID  - Cloudflare Access service token ID
 # CF_SERVICE_TOKEN_SECRET - Cloudflare Access service token secret
 #

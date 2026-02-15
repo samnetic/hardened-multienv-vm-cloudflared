@@ -23,7 +23,7 @@
 tunnel: YOUR_TUNNEL_UUID
 
 # Credentials file location (created automatically during tunnel creation)
-credentials-file: /root/.cloudflared/YOUR_TUNNEL_UUID.json
+credentials-file: /etc/cloudflared/YOUR_TUNNEL_UUID.json
 
 # =================================================================
 # Ingress Rules (Order matters! First match wins)
@@ -40,51 +40,13 @@ ingress:
     service: ssh://localhost:22
 
   # -----------------------------------------------------------------
-  # Admin panels - REQUIRE LOGIN
-  # Access Policy: Allow (emails ending in @yourcompany.com OR OTP)
+  # Recommended: Route all HTTP traffic to Caddy on localhost.
+  # Caddy then routes by hostname to containers on internal Docker networks.
+  #
+  # Access protection (SSO / service tokens) is configured in Cloudflare Zero Trust
+  # per hostname (e.g., monitoring.yourdomain.com, n8n.yourdomain.com).
   # -----------------------------------------------------------------
-  # n8n Editor UI (protected)
-  - hostname: n8n.yourdomain.com
-    service: http://localhost:5678
-
-  # Monitoring dashboard (protected)
-  - hostname: monitoring.yourdomain.com
-    service: http://localhost:19999
-
-  # -----------------------------------------------------------------
-  # Webhooks - PUBLIC (no Access policy)
-  # Do NOT create an Access application for these
-  # -----------------------------------------------------------------
-  - hostname: hooks.yourdomain.com
-    service: http://localhost:5678
-
-  # -----------------------------------------------------------------
-  # Dev/Staging - REQUIRE LOGIN (team only)
-  # Access Policy: Allow (team members only)
-  # -----------------------------------------------------------------
-  - hostname: dev-app.yourdomain.com
-    service: http://localhost:80
-
-  - hostname: staging-app.yourdomain.com
-    service: http://localhost:80
-
-  # -----------------------------------------------------------------
-  # Production app - Your choice
-  # No Access = public, with Access = protected
-  # -----------------------------------------------------------------
-  - hostname: app.yourdomain.com
-    service: http://localhost:80
-
-  - hostname: yourdomain.com
-    service: http://localhost:80
-
-  - hostname: www.yourdomain.com
-    service: http://localhost:80
-
-  # -----------------------------------------------------------------
-  # Catch-all (returns 404 for unconfigured subdomains)
-  # -----------------------------------------------------------------
-  - service: http_status:404
+  - service: http://localhost:80
 
 # =================================================================
 # Protocol Configuration

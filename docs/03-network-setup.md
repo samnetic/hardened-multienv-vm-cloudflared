@@ -26,6 +26,7 @@ Internet → Cloudflare CDN → Encrypted Tunnel → VM → Caddy → Docker Net
 
 | Network | Type | Environment | Purpose |
 |---------|------|-------------|---------|
+| `hosting-caddy-origin` | internal | Shared | Reverse proxy origin enforcement (tunnel-only) |
 | `dev-web` | bridge | Dev | Apps accessible via Caddy |
 | `dev-backend` | bridge | Dev | DBs accessible from host (for local development) |
 | `staging-web` | bridge | Staging | Apps accessible via Caddy |
@@ -42,16 +43,17 @@ Internet → Cloudflare CDN → Encrypted Tunnel → VM → Caddy → Docker Net
 - Used for web-facing services
 
 **Internal Networks** (`internal`)
-- Containers can only communicate with each other
-- NO access from the host or external networks
-- Used for databases in staging/production
+- Containers can communicate with each other on that network
+- Containers do not have external routing (no internet access by default)
+- Used for databases in staging/production and for `hosting-caddy-origin`
+- Note: don’t treat `internal` as a complete host firewall; keep UFW + “no published ports”
 
 ### Creating Networks
 
 Run the network creation script:
 
 ```bash
-./scripts/create-networks.sh
+sudo ./scripts/create-networks.sh
 ```
 
 This creates all networks with proper isolation settings.
@@ -60,19 +62,19 @@ This creates all networks with proper isolation settings.
 
 ```bash
 # List all networks
-docker network ls
+sudo docker network ls
 
 # Inspect a network
-docker network inspect prod-backend
+sudo docker network inspect prod-backend
 
 # Create a bridge network
-docker network create my-network
+sudo docker network create my-network
 
 # Create an internal network (isolated)
-docker network create my-network --internal
+sudo docker network create my-network --internal
 
 # Remove a network
-docker network rm my-network
+sudo docker network rm my-network
 ```
 
 ---
@@ -196,7 +198,7 @@ See `infra/cloudflared/config.yml.example`:
 
 ```yaml
 tunnel: YOUR_TUNNEL_UUID
-credentials-file: /root/.cloudflared/YOUR_TUNNEL_UUID.json
+credentials-file: /etc/cloudflared/YOUR_TUNNEL_UUID.json
 
 ingress:
   # SSH access
@@ -329,17 +331,17 @@ services:
 # Error: network "prod-web" not found
 
 # Solution: Create networks first
-./scripts/create-networks.sh
+sudo ./scripts/create-networks.sh
 ```
 
 ### Container Can't Reach Another Container
 
 ```bash
 # Check both containers are on the same network
-docker network inspect prod-web
+sudo docker network inspect prod-web
 
 # Verify container names
-docker ps --format "{{.Names}}"
+sudo docker ps --format "{{.Names}}"
 ```
 
 ### Can't Access Database from Host
@@ -374,17 +376,17 @@ sudo tail -f /var/log/ufw.log
 ### Create All Networks
 
 ```bash
-./scripts/create-networks.sh
+sudo ./scripts/create-networks.sh
 ```
 
 ### Check Network Status
 
 ```bash
 # List networks
-docker network ls
+sudo docker network ls
 
 # Show connected containers
-docker network inspect prod-web --format='{{range .Containers}}{{.Name}} {{end}}'
+sudo docker network inspect prod-web --format='{{range .Containers}}{{.Name}} {{end}}'
 ```
 
 ### Firewall Status

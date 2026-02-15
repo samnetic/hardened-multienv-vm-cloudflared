@@ -222,7 +222,7 @@ setup_cloudflare_api() {
     echo ""
     print_info "You can configure SSL/TLS manually at:"
     echo "  https://dash.cloudflare.com → $domain → SSL/TLS → Overview"
-    echo "  Set Encryption mode to: Flexible"
+    echo "  Set Encryption mode to: Full"
     echo ""
     return 1
   fi
@@ -253,20 +253,20 @@ setup_cloudflare_api() {
 # Cloudflare API Operations
 # =================================================================
 
-# Set SSL/TLS mode to Flexible
-set_ssl_flexible() {
+# Set SSL/TLS mode to Full (recommended; avoids "Flexible" downgrade footguns)
+set_ssl_full() {
   local zone_id="$1"
   local token="$2"
 
-  print_step "Setting SSL/TLS mode to Flexible..."
+  print_step "Setting SSL/TLS mode to Full..."
 
   local ssl_response=$(curl -s -X PATCH "https://api.cloudflare.com/client/v4/zones/$zone_id/settings/ssl" \
     -H "Authorization: Bearer $token" \
     -H "Content-Type: application/json" \
-    --data '{"value":"flexible"}')
+    --data '{"value":"full"}')
 
   if echo "$ssl_response" | grep -q '"success":true'; then
-    print_success "SSL/TLS mode set to Flexible"
+    print_success "SSL/TLS mode set to Full"
     return 0
   else
     print_error "Failed to set SSL/TLS mode"
@@ -322,7 +322,7 @@ configure_ssl_settings() {
   local zone_id="$1"
   local token="$2"
 
-  set_ssl_flexible "$zone_id" "$token"
+  set_ssl_full "$zone_id" "$token"
   enable_always_https "$zone_id" "$token"
   enable_auto_https_rewrites "$zone_id" "$token"
 }

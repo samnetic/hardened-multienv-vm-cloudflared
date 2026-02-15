@@ -31,10 +31,17 @@ if ! command -v docker &> /dev/null; then
   exit 1
 fi
 
+# Prefer a security-first model: humans are not in the docker group.
+# If docker isn't directly accessible, fall back to sudo.
+DOCKER=(docker)
 if ! docker info &> /dev/null; then
-  echo -e "${RED}Error: Docker daemon is not running${NC}"
-  echo "Start Docker with: sudo systemctl start docker"
-  exit 1
+  DOCKER=(sudo docker)
+  if ! "${DOCKER[@]}" info &> /dev/null; then
+    echo -e "${RED}Error: Docker not accessible as this user${NC}"
+    echo "Try running:"
+    echo "  sudo $0"
+    exit 1
+  fi
 fi
 
 # Function to create network if it doesn't exist
@@ -43,22 +50,43 @@ create_network() {
   local network_type=${2:-bridge}  # Default to bridge
   local description=${3:-""}
 
-  if docker network ls --format '{{.Name}}' | grep -qx "$network_name"; then
+  if "${DOCKER[@]}" network ls --format '{{.Name}}' | grep -qx "$network_name"; then
     echo -e "${YELLOW}⚠  Network '$network_name' already exists${NC}"
+    if [ "$network_name" = "hosting-caddy-origin" ]; then
+      local gateway
+      local internal
+      gateway=$("${DOCKER[@]}" network inspect "$network_name" --format '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || echo "")
+      internal=$("${DOCKER[@]}" network inspect "$network_name" --format '{{.Internal}}' 2>/dev/null || echo "")
+      if [ "$gateway" != "10.250.0.1" ] || [ "$internal" != "true" ]; then
+        echo -e "${YELLOW}⚠  hosting-caddy-origin settings differ from expected (gateway=$gateway internal=$internal)${NC}"
+        echo "    This can break Caddy tunnel-only enforcement."
+        echo "    Fix (downtime):"
+        echo "      1) cd /srv/infrastructure/reverse-proxy && sudo docker compose down"
+        echo "      2) sudo docker network rm hosting-caddy-origin"
+        echo "      3) sudo $0"
+        echo "      4) cd /srv/infrastructure/reverse-proxy && sudo docker compose up -d"
+      fi
+    fi
   else
     echo -n "Creating network '$network_name'"
     [ -n "$description" ] && echo -n " ($description)"
     echo -n "... "
 
-    local create_cmd="docker network create $network_name"
-    [ "$network_type" = "internal" ] && create_cmd="$create_cmd --internal"
+    # hosting-caddy-origin is a fixed-subnet internal network used for the reverse proxy
+    # tunnel-only enforcement (see infra/reverse-proxy/Caddyfile).
+    local create_cmd=("${DOCKER[@]}" network create "$network_name")
+    if [ "$network_name" = "hosting-caddy-origin" ]; then
+      create_cmd+=("--internal" "--subnet" "10.250.0.0/24" "--gateway" "10.250.0.1")
+    elif [ "$network_type" = "internal" ]; then
+      create_cmd+=("--internal")
+    fi
 
-    if $create_cmd > /dev/null 2>&1; then
+    if "${create_cmd[@]}" > /dev/null 2>&1; then
       echo -e "${GREEN}✓${NC}"
     else
       echo -e "${RED}FAILED${NC}"
       echo "  Error: Failed to create network '$network_name'" >&2
-      echo "  Check if Docker daemon is running: docker info" >&2
+      echo "  Check Docker: sudo systemctl status docker" >&2
       return 1
     fi
   fi
@@ -96,6 +124,7 @@ echo ""
 # =================================================================
 echo "Shared networks:"
 create_network "monitoring" "bridge" "optional monitoring stack" || ((FAILURES++))
+create_network "hosting-caddy-origin" "internal" "reverse proxy origin enforcement (tunnel-only)" || ((FAILURES++))
 echo ""
 
 # Check for failures
@@ -113,7 +142,7 @@ echo -e "${BLUE} Network Creation Complete!${NC}"
 echo -e "${BLUE}======================================================================${NC}"
 echo ""
 echo "Created networks:"
-docker network ls --format "  {{.Name}}" | grep -E "dev-|staging-|prod-|monitoring" || echo "  (none found)"
+"${DOCKER[@]}" network ls --format "  {{.Name}}" | grep -E "dev-|staging-|prod-|monitoring|hosting-caddy-origin" || echo "  (none found)"
 echo ""
 echo "Environment Overview:"
 echo ""
@@ -131,6 +160,7 @@ echo "    • prod-backend  - Backend services (internal only)"
 echo ""
 echo "  SHARED:"
 echo "    • monitoring    - Optional Netdata monitoring"
+echo "    • hosting-caddy-origin - Reverse proxy origin enforcement network"
 echo ""
 echo -e "${GREEN}✓ All networks ready!${NC}"
 echo ""

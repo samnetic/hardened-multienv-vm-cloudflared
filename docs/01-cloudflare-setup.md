@@ -7,7 +7,7 @@ Complete guide for configuring Cloudflare for this blueprint.
 ## Overview
 
 This blueprint uses Cloudflare's free tier for:
-- **SSL/TLS** - HTTPS encryption (Flexible mode)
+- **SSL/TLS** - HTTPS encryption (Full mode recommended)
 - **CDN** - Content delivery and caching
 - **DDoS Protection** - Free DDoS mitigation
 - **WAF** - Web Application Firewall
@@ -43,18 +43,15 @@ Cloudflare Dashboard will show "Active" when nameservers are updated.
 
 ## SSL/TLS Configuration
 
-### Encryption Mode: Flexible
+### Encryption Mode: Full
 
 **Dashboard:** SSL/TLS → Overview
 
-Set encryption mode to **Flexible**:
-- ✅ Cloudflare → Visitors: HTTPS (encrypted)
-- ✅ Cloudflare → Origin: HTTP (tunnel is encrypted)
+Set encryption mode to **Full**.
 
-**Why Flexible?**
-- Cloudflare Tunnel is already encrypted
-- Caddy runs HTTP-only (no certificate management needed)
-- Simpler setup, same security
+**Why Full?**
+- Avoids "Flexible" downgrade footguns if you ever expose an origin IP later
+- Works fine with Tunnel (Cloudflare Tunnel is already encrypted; Caddy can remain HTTP on localhost)
 
 ### Additional Settings
 
@@ -195,7 +192,7 @@ Enabled automatically for all traffic.
 **Issue:** "Your connection is not private"
 
 **Solution:**
-1. Check SSL/TLS mode (should be Flexible)
+1. Check SSL/TLS mode (should be Full)
 2. Wait 1-2 minutes for settings to propagate
 3. Clear browser cache
 
@@ -205,8 +202,8 @@ Enabled automatically for all traffic.
 
 **Check:**
 1. Tunnel running: `sudo systemctl status cloudflared`
-2. Caddy running: `docker compose ps` (in infra/reverse-proxy)
-3. App running: `docker ps`
+2. Caddy running: `sudo docker compose ps` (in infra/reverse-proxy)
+3. App running: `sudo docker ps`
 4. Tunnel logs: `sudo journalctl -u cloudflared -f`
 
 ### DNS Not Resolving
@@ -226,13 +223,13 @@ Enabled automatically for all traffic.
 **Check:**
 1. Firewall allows outbound 443, 7844: `sudo ufw status`
 2. Config file correct: `sudo nano /etc/cloudflared/config.yml`
-3. Credentials file exists: `ls -la /root/.cloudflared/`
+3. Credentials file exists: `sudo ls -la /etc/cloudflared/*.json`
 
 ---
 
 ## Best Practices
 
-✅ **Use Flexible SSL** - Simpler setup with tunnel
+✅ **Use Full SSL/TLS** - Recommended default (Tunnel still uses localhost HTTP)
 ✅ **Enable Always Use HTTPS** - Force encryption
 ✅ **Enable rate limiting** - Protect against abuse
 ✅ **Monitor tunnel status** - Check daily

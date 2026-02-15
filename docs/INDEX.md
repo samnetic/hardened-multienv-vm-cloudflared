@@ -31,6 +31,8 @@ Security configuration and best practices:
 | [02-security-hardening.md](02-security-hardening.md) | Kernel hardening, SSH hardening, fail2ban, auditd | 20 min |
 | [09-hardening-checklist.md](09-hardening-checklist.md) | Complete security checklist for production readiness | 10 min |
 | [14-cloudflare-zero-trust.md](14-cloudflare-zero-trust.md) | Protect admin panels with Cloudflare Access | 15 min |
+| [15-security-tools.md](15-security-tools.md) | Optional: AIDE, Lynis, rkhunter, debsums, acct, alerting | 10 min |
+| [16-advanced-hardening.md](16-advanced-hardening.md) | Optional: extra host + Cloudflare hardening, CI trust model | 10 min |
 
 **Key Takeaway:** This template provides enterprise-grade security out of the box.
 
@@ -61,7 +63,7 @@ Configure reverse proxy and DNS:
 | [03-network-setup.md](03-network-setup.md) | Docker networks and environment isolation | 10 min |
 | [caddy-configuration-guide.md](caddy-configuration-guide.md) | Caddy reverse proxy configuration examples | 20 min |
 
-**Pro Tip:** Caddy automatically handles SSL certificates via Cloudflare.
+**Pro Tip:** With Cloudflare Tunnel, TLS is handled at Cloudflare's edge; Caddy can run HTTP-only on `localhost`.
 
 ---
 
@@ -73,6 +75,7 @@ Deploy and manage applications:
 |-------|-------------|-----------|
 | [12-running-multiple-apps.md](12-running-multiple-apps.md) | Deploy multiple apps with environment isolation | 15 min |
 | [08-environment-tiers.md](08-environment-tiers.md) | Dev, staging, production environments | 10 min |
+| [19-production-docker-compose.md](19-production-docker-compose.md) | Production-ready Docker Compose hardening checklist + template notes | 10 min |
 
 **Recommended Workflow:** Deploy to dev → test → promote to staging → production.
 
@@ -86,7 +89,7 @@ Secure secrets management:
 |-------|-------------|-----------|
 | [06-secrets-management.md](06-secrets-management.md) | File-based secrets system (not in git) | 15 min |
 
-**Important:** Secrets are stored in `/var/secrets/` with 600 permissions, never in git.
+**Important:** Secrets are stored in `/var/secrets/` as `root:hosting-secrets` with `640` permissions, never in git.
 
 ---
 
@@ -98,7 +101,7 @@ Automated deployment workflows:
 |-------|-------------|-----------|
 | [07-gitops-workflow.md](07-gitops-workflow.md) | GitHub Actions deployment pipeline | 20 min |
 
-**Workflow:** Feature branch → DEV, main branch → STAGING, git tag → PRODUCTION.
+**Workflow:** Feature branch → DEV, main branch → STAGING, manual production deploy of a tag (`version=v*`).
 
 ---
 
@@ -110,7 +113,7 @@ Manage system users and permissions:
 |-------|-------------|-----------|
 | [10-user-management.md](10-user-management.md) | Two-user system (sysadmin + appmgr) | 10 min |
 
-**Security Model:** `sysadmin` for administration, `appmgr` for CI/CD (no sudo).
+**Security Model:** `sysadmin` for administration, `appmgr` for CI/CD (restricted SSH + sudo allowlist to `hosting-deploy` only).
 
 ---
 
@@ -121,9 +124,11 @@ Monitor and maintain your VM:
 | Guide | Description | Read Time |
 |-------|-------------|-----------|
 | [13-monitoring-with-netdata.md](13-monitoring-with-netdata.md) | Real-time system monitoring dashboard | 10 min |
+| [17-monitoring-separate-vps.md](17-monitoring-separate-vps.md) | Recommended monitoring/control-plane pattern | 10 min |
+| [18-monitoring-server.md](18-monitoring-server.md) | Prometheus + Grafana + alerting on a separate monitoring VPS | 20 min |
 | [11-vm-best-practices.md](11-vm-best-practices.md) | Maintenance, backups, and operational best practices | 15 min |
 
-**Monitoring Stack:** Netdata for system metrics, Portainer for Docker management.
+**Monitoring Stack:** Prefer a separate monitoring VPS. Optionally run Netdata locally and protect it with Cloudflare Access.
 
 ---
 

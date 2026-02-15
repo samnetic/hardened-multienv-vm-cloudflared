@@ -11,6 +11,11 @@
 
 set -euo pipefail
 
+# Repo paths (for optional unit installation)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+CONFIG_DIR="${REPO_DIR}/config"
+
 # Parse arguments
 FORCE_JAMMY=false
 SKIP_GPG_CHECK=false
@@ -50,8 +55,81 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
+# Ensure required tools exist (this script may be run standalone on a fresh VM).
+export DEBIAN_FRONTEND=noninteractive
+
+# apt-daily/apt-daily-upgrade can hold locks on fresh Ubuntu installs.
+wait_for_apt() {
+  local timeout="${APT_LOCK_TIMEOUT:-300}"
+  local start now elapsed
+  start="$(date +%s)"
+
+  while true; do
+    local locked=false
+
+    if command -v fuser >/dev/null 2>&1; then
+      if fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
+         fuser /var/lib/dpkg/lock >/dev/null 2>&1 || \
+         fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
+         fuser /var/cache/apt/archives/lock >/dev/null 2>&1; then
+        locked=true
+      fi
+    else
+      if pgrep -x apt-get >/dev/null 2>&1 || \
+         pgrep -x apt >/dev/null 2>&1 || \
+         pgrep -x dpkg >/dev/null 2>&1 || \
+         pgrep -f unattended-upgrade >/dev/null 2>&1; then
+        locked=true
+      fi
+    fi
+
+    if [ "$locked" = false ]; then
+      return 0
+    fi
+
+    now="$(date +%s)"
+    elapsed=$((now - start))
+    if [ "$elapsed" -ge "$timeout" ]; then
+      echo -e "${RED}✗ Timed out waiting for apt/dpkg locks after ${timeout}s${NC}"
+      echo "Try: sudo systemctl stop apt-daily.service apt-daily-upgrade.service"
+      exit 1
+    fi
+
+    echo "Waiting for apt/dpkg locks... (${elapsed}s)"
+    sleep 5
+  done
+}
+
+if ! command -v curl >/dev/null 2>&1; then
+  echo "Installing curl..."
+  wait_for_apt
+  apt-get update
+  wait_for_apt
+  apt-get install -y curl ca-certificates
+fi
+if ! command -v gpg >/dev/null 2>&1; then
+  echo "Installing gnupg..."
+  wait_for_apt
+  apt-get update
+  wait_for_apt
+  apt-get install -y gnupg
+fi
+
 # Detect distribution
-CODENAME=$(lsb_release -cs)
+if command -v lsb_release >/dev/null 2>&1; then
+  CODENAME="$(lsb_release -cs)"
+else
+  # Fallback if lsb-release isn't installed.
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    CODENAME="${VERSION_CODENAME:-}"
+  fi
+fi
+if [ -z "${CODENAME:-}" ]; then
+  echo -e "${RED}✗ Could not detect Ubuntu codename${NC}"
+  echo "Install lsb-release or verify /etc/os-release has VERSION_CODENAME."
+  exit 1
+fi
 echo "Detected Ubuntu codename: $CODENAME"
 echo ""
 
@@ -153,11 +231,34 @@ echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudf
 
 # Update package list
 echo "Updating package list..."
-apt update
+wait_for_apt
+apt-get update
 
 # Install cloudflared
 echo "Installing cloudflared..."
-apt install -y cloudflared
+wait_for_apt
+apt-get install -y cloudflared
+
+# Optional: install and enable automatic cloudflared upgrades (systemd timer)
+echo ""
+echo "Configuring automatic cloudflared upgrades (recommended)..."
+if command -v systemctl >/dev/null 2>&1; then
+  if [ -f "${CONFIG_DIR}/bin/hosting-cloudflared-upgrade" ] && \
+     [ -f "${CONFIG_DIR}/systemd/hosting-cloudflared-upgrade.service" ] && \
+     [ -f "${CONFIG_DIR}/systemd/hosting-cloudflared-upgrade.timer" ]; then
+    install -d -m 0755 /usr/local/sbin
+    install -m 0755 "${CONFIG_DIR}/bin/hosting-cloudflared-upgrade" /usr/local/sbin/hosting-cloudflared-upgrade
+    install -m 0644 "${CONFIG_DIR}/systemd/hosting-cloudflared-upgrade.service" /etc/systemd/system/hosting-cloudflared-upgrade.service
+    install -m 0644 "${CONFIG_DIR}/systemd/hosting-cloudflared-upgrade.timer" /etc/systemd/system/hosting-cloudflared-upgrade.timer
+    systemctl daemon-reload
+    systemctl enable --now hosting-cloudflared-upgrade.timer >/dev/null 2>&1 || true
+    echo -e "${GREEN}✓ Automatic cloudflared upgrades enabled (hosting-cloudflared-upgrade.timer)${NC}"
+  else
+    echo -e "${YELLOW}⚠ Missing upgrade timer templates under ${CONFIG_DIR}/ (skipping)${NC}"
+  fi
+else
+  echo -e "${YELLOW}⚠ systemctl not found (skipping auto-upgrade timer)${NC}"
+fi
 
 # Verify installation
 echo ""

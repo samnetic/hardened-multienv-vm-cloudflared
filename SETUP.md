@@ -56,8 +56,7 @@ cd /opt/hosting-blueprint
 
 ```bash
 # Make scripts executable
-chmod +x scripts/*.sh
-chmod +x scripts/**/*.sh
+find scripts -type f -name '*.sh' -exec chmod +x {} \;
 
 # (Optional) Preview what will be changed without executing
 sudo ./scripts/setup-vm.sh --dry-run
@@ -67,7 +66,7 @@ sudo ./scripts/setup-vm.sh
 ```
 
 **What this does:**
-- Creates `sysadmin` (sudo) and `appmgr` (no sudo) users
+- Creates `sysadmin` (sudo) and `appmgr` (CI-only; restricted SSH) users
 - Hardens SSH configuration (key-only auth, strong ciphers)
 - Hardens kernel parameters (sysctl settings)
 - Enables UFW firewall (temporarily allows SSH)
@@ -75,7 +74,7 @@ sudo ./scripts/setup-vm.sh
 - Configures fail2ban (SSH brute-force protection)
 - Configures auditd (security event logging)
 - Creates deployment directories at `/srv/apps/{dev,staging,production}`
-- Installs systemd service for Docker Compose auto-start on boot
+- Installs (but does not enable) an optional systemd service for Docker Compose fan-out on boot
 - Configures automatic security updates
 
 **⚠️ IMPORTANT:** The script will ask for SSH public keys. Have them ready or add them manually after.
@@ -87,7 +86,7 @@ sudo ./scripts/setup-vm.sh
 ssh sysadmin@your-server-ip
 
 # If successful, reload SSH on the server
-sudo systemctl reload sshd
+sudo systemctl reload ssh || sudo systemctl reload sshd
 ```
 
 ✅ **Checkpoint:** You can now SSH as `sysadmin` without password
@@ -106,14 +105,14 @@ sudo systemctl reload sshd
 ### 2.2 Configure SSL/TLS Settings
 
 **SSL/TLS** → **Overview**:
-- Encryption mode: **Flexible** (or **Full** - see note below)
+- Encryption mode: **Full** (recommended)
 - TLS 1.3: **On**
 - Automatic HTTPS Rewrites: **On**
 - Always Use HTTPS: **On**
 - Opportunistic Encryption: **On**
 - Minimum TLS Version: **1.2**
 
-> **Note on Encryption Mode:** "Flexible" works because Cloudflare Tunnel creates its own encrypted connection to your origin - traffic never travels unencrypted over the internet. However, if you prefer explicit clarity or might later expose services directly, use "Full" mode instead. The tunnel's internal HTTP connection (localhost:80) is already secure within the encrypted tunnel.
+> **Note on Encryption Mode:** With Cloudflare Tunnel, Cloudflare ↔ origin traffic is already encrypted via the tunnel. Even so, **avoid "Flexible"** to prevent downgrade footguns if you ever expose an origin IP later. Use **"Full"** as your default.
 
 **SSL/TLS** → **Edge Certificates**:
 - Create certificate for:
@@ -167,7 +166,7 @@ Replace:
 
 ```yaml
 tunnel: a9ae4e2e-f936-47a8-b3ec-aadcef3c50d0
-credentials-file: /root/.cloudflared/a9ae4e2e-f936-47a8-b3ec-aadcef3c50d0.json
+credentials-file: /etc/cloudflared/a9ae4e2e-f936-47a8-b3ec-aadcef3c50d0.json
 
 ingress:
   - hostname: ssh.yourdomain.com
@@ -199,21 +198,21 @@ sudo journalctl -u cloudflared -f
 
 ### 2.8 Lock Down Firewall
 
-Now that tunnel is working, restrict access to Cloudflare IPs only:
+Now that tunnel is working, lock down inbound ports (tunnel-only):
 
 ```bash
-# Download Cloudflare IP ranges
-curl -s https://www.cloudflare.com/ips-v4 -o /tmp/cf_ips_v4
-curl -s https://www.cloudflare.com/ips-v6 -o /tmp/cf_ips_v6
+# With Cloudflare Tunnel, you do NOT need to allow inbound 80/443 at all.
+# All HTTP traffic arrives over the tunnel to localhost.
+sudo ufw deny 80/tcp
+sudo ufw deny 443/tcp
 
-# Allow only Cloudflare IPs to web ports
-while read ip; do sudo ufw allow from $ip to any port 80,443 proto tcp; done < /tmp/cf_ips_v4
-while read ip; do sudo ufw allow from $ip to any port 80,443 proto tcp; done < /tmp/cf_ips_v6
-
-# Remove public SSH access (tunnel handles it now)
+# Remove direct SSH access (tunnel handles it now)
 sudo ufw delete allow OpenSSH
 
-# Verify - port 22 should NOT be listed
+# Block direct SSH from the internet (cloudflared still reaches localhost:22)
+sudo ufw deny 22/tcp
+
+# Verify
 sudo ufw status verbose
 ```
 
@@ -226,11 +225,14 @@ sudo ufw status verbose
 ### 3.1 Create Docker Networks
 
 ```bash
-# Create isolated networks for staging, production, monitoring
-./scripts/create-networks.sh
+# Create isolated networks for dev, staging, production, monitoring
+sudo ./scripts/create-networks.sh
 ```
 
 Creates:
+- `hosting-caddy-origin` - Reverse proxy origin enforcement (tunnel-only)
+- `dev-web` - Dev apps + Caddy
+- `dev-backend` - Dev databases (reachable from host for local dev)
 - `prod-web` - Production apps + Caddy
 - `prod-backend` - Production databases (internal only)
 - `staging-web` - Staging apps + Caddy
@@ -240,7 +242,11 @@ Creates:
 ### 3.2 Configure Reverse Proxy (Caddy)
 
 ```bash
-cd infra/reverse-proxy
+# Recommended: runtime infrastructure lives in /srv/infrastructure
+cd /srv/infrastructure/reverse-proxy
+
+# Fallback (template directory):
+# cd /opt/hosting-blueprint/infra/reverse-proxy
 
 # Copy environment file
 cp .env.example .env
@@ -270,13 +276,13 @@ sed -i 's/yourdomain.com/yourREALdomain.com/g' Caddyfile
 
 ```bash
 # Start Caddy
-docker compose up -d
+sudo docker compose up -d
 
 # Check status
-docker compose ps
+sudo docker compose ps
 
 # View logs
-docker compose logs -f caddy
+sudo docker compose logs -f caddy
 ```
 
 ✅ **Checkpoint:** Caddy is running and waiting for app traffic
@@ -307,13 +313,13 @@ DOCKER_NETWORK=staging-web
 
 ```bash
 # Deploy app
-docker compose up -d
+sudo docker compose up -d
 
 # Check status
-docker compose ps
+sudo docker compose ps
 
 # View logs
-docker compose logs -f
+sudo docker compose logs -f
 ```
 
 ### 4.3 Add to Caddy
@@ -339,7 +345,7 @@ http://staging-app.yourdomain.com {
 
 Restart Caddy:
 ```bash
-docker compose restart caddy
+sudo docker compose restart caddy
 ```
 
 ### 4.4 Test Your App
@@ -361,33 +367,19 @@ curl https://staging-app.yourdomain.com
 
 ### 5.1 Install cloudflared on Your Workstation
 
-**Debian/Ubuntu (Local Machine):**
+Recommended (installs cloudflared + configures SSH for tunnel access):
+
 ```bash
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
-sudo dpkg -i cloudflared.deb
-cloudflared --version
-rm cloudflared.deb
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com appmgr
 ```
 
-**macOS:**
-```bash
-brew install cloudflared
-```
+Manual install (if you prefer):
 
-**Arch Linux:**
-```bash
-sudo pacman -S cloudflared
-```
-
-**Other Linux:**
-```bash
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
-chmod +x cloudflared
-sudo mv cloudflared /usr/local/bin/
-```
-
-**Windows:**
-Download from: https://github.com/cloudflare/cloudflared/releases
+- macOS: `brew install cloudflared`
+- Debian/Ubuntu: install via the official repo at `https://pkg.cloudflare.com/cloudflared`
+- Arch: `sudo pacman -S cloudflared`
+- Windows: install from Cloudflare’s official releases
 
 ### 5.2 Test Tunnel SSH (Full Command)
 
@@ -410,6 +402,14 @@ ssh -o ProxyCommand="cloudflared access ssh --hostname ssh.yourdomain.com" sysad
 ### 5.3 Configure SSH Config (ESSENTIAL for Convenience)
 
 To avoid typing that long ProxyCommand every time, configure SSH:
+
+Recommended shortcut (this blueprint's helper):
+```bash
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+
+# Default alias is the first label of your domain:
+ssh yourdomain
+```
 
 **Edit config file**:
 ```bash
@@ -490,20 +490,19 @@ Once tunnel SSH is proven working:
 # Connect via tunnel
 ssh myserver
 
-# Get Cloudflare IP ranges
-curl -s https://www.cloudflare.com/ips-v4 -o /tmp/cf_ips_v4
-curl -s https://www.cloudflare.com/ips-v6 -o /tmp/cf_ips_v6
+# Tunnel-only firewall: do not allow inbound web ports
+sudo ufw deny 80/tcp
+sudo ufw deny 443/tcp
 
-# Allow only Cloudflare IPs to web ports
-while read ip; do sudo ufw allow from $ip to any port 80,443 proto tcp; done < /tmp/cf_ips_v4
-while read ip; do sudo ufw allow from $ip to any port 80,443 proto tcp; done < /tmp/cf_ips_v6
-
-# Remove public SSH access
+# Remove direct SSH access
 sudo ufw delete allow OpenSSH
 sudo ufw delete allow 22/tcp
 
-# Verify - port 22 should NOT be listed
-sudo ufw status verbose | grep 22
+# Explicitly deny SSH from the internet (cloudflared uses localhost)
+sudo ufw deny 22/tcp
+
+# Verify
+sudo ufw status verbose | grep -E "80/tcp|443/tcp|22/tcp" || true
 ```
 
 **Final test**:
@@ -562,8 +561,8 @@ DOCKER_NETWORK=prod-web
 ### 6.2 Deploy
 
 ```bash
-docker compose up -d
-docker compose ps
+sudo docker compose up -d
+sudo docker compose ps
 ```
 
 ### 6.3 Add to Caddy
@@ -589,7 +588,7 @@ http://app.yourdomain.com {
 
 Restart Caddy:
 ```bash
-docker compose restart caddy
+sudo docker compose restart caddy
 ```
 
 ### 6.4 Test Production
@@ -642,8 +641,9 @@ Update:
 ### 7.4 Deploy
 
 ```bash
-docker compose pull  # or docker compose build
-docker compose up -d
+sudo docker compose pull  # recommended (pre-built images)
+# For local-only builds (not recommended for GitOps/production): sudo docker compose build
+sudo docker compose up -d
 ```
 
 ### 7.5 Add to Caddy
@@ -665,7 +665,7 @@ http://staging-my-app.yourdomain.com {
 
 Restart:
 ```bash
-docker compose restart caddy
+sudo docker compose restart caddy
 ```
 
 ---
@@ -675,13 +675,13 @@ docker compose restart caddy
 After setup, verify everything works:
 
 - [ ] Tunnel status: `sudo systemctl status cloudflared`
-- [ ] Caddy status: `cd infra/reverse-proxy && docker compose ps`
-- [ ] Apps running: `docker ps`
+- [ ] Caddy status: `cd /srv/infrastructure/reverse-proxy && sudo docker compose ps`
+- [ ] Apps running: `sudo docker ps`
 - [ ] Staging app: `curl https://staging-app.yourdomain.com`
 - [ ] Production app: `curl https://app.yourdomain.com`
 - [ ] SSH via tunnel: `ssh myserver`
 - [ ] Firewall locked: `sudo ufw status` (no port 22)
-- [ ] Docker networks: `docker network ls | grep -E "staging|prod"`
+- [ ] Docker networks: `sudo docker network ls | grep -E "staging|prod"`
 
 ---
 
@@ -698,20 +698,19 @@ sudo journalctl -u cloudflared -f
 
 ```bash
 # Check if Caddy is running
-cd infra/reverse-proxy
-docker compose ps
-docker compose logs caddy
+cd /srv/infrastructure/reverse-proxy
+sudo docker compose ps
+sudo docker compose logs caddy
 
 # Check if app is running
-cd ../../apps/examples/hello-world
-docker compose ps
+sudo docker ps
 ```
 
 ### App container unhealthy
 
 ```bash
-docker compose logs app
-docker inspect app-staging | grep -A 10 Health
+sudo docker compose logs app
+sudo docker inspect app-staging | grep -A 10 Health
 ```
 
 ### DNS not resolving

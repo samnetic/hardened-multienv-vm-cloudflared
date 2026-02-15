@@ -24,17 +24,25 @@ cd /srv/apps/production/my-api
 
 # Configure environment
 cp .env.example .env
-vim .env  # Set APP_NAME, DOMAIN, etc.
+vim .env  # Set APP_NAME, DOCKER_NETWORK, IMAGE, etc.
 
-# Start the API
-docker compose up -d
+# GitOps-friendly: deploy a pre-built image (no host ports published)
+sudo docker compose pull
+sudo docker compose up -d
 
 # View logs
-docker compose logs -f
+sudo docker compose logs -f
 
-# Test locally
-curl http://localhost:8000/health
-curl http://localhost:8000/api/v1/hello
+# Smoke test from inside the container
+sudo docker compose exec api curl -f http://localhost:8000/health
+sudo docker compose exec api curl -f http://localhost:8000/api/v1/hello
+```
+
+Optional: local/VM-side build + loopback port (convenience only, not GitOps-safe):
+
+```bash
+sudo docker compose -f compose.yml -f compose.local.yml up -d --build
+curl http://127.0.0.1:8000/health
 ```
 
 ### 2. Add to Caddy
@@ -54,7 +62,7 @@ Reload Caddy:
 
 ```bash
 cd /srv/infrastructure/reverse-proxy
-docker compose restart caddy
+sudo docker compose restart caddy
 ```
 
 ### 3. Add DNS
@@ -89,6 +97,7 @@ curl https://api.yourdomain.com/docs  # OpenAPI docs
 | `APP_NAME` | Yes | - | Application name |
 | `ENVIRONMENT` | Yes | - | `production` or `staging` |
 | `DOCKER_NETWORK` | Yes | - | `prod-web` or `staging-web` |
+| `IMAGE` | No | `ghcr.io/your-org/my-api:1.0.0` | Container image to deploy |
 | `LOG_LEVEL` | No | `INFO` | Logging level |
 | `ALLOWED_ORIGINS` | No | `*` | CORS allowed origins |
 
@@ -110,8 +119,9 @@ curl http://localhost:8000/health
 ### Build Docker Image
 
 ```bash
-docker build -t my-api:latest .
-docker run -p 8000:8000 my-api:latest
+# Recommended: use the provided override for local builds
+sudo docker compose -f compose.yml -f compose.local.yml build
+sudo docker compose -f compose.yml -f compose.local.yml up -d
 ```
 
 ## Security Features
@@ -131,17 +141,17 @@ This example includes production-ready security:
 ### View Logs
 
 ```bash
-docker compose logs -f
+sudo docker compose logs -f
 
 # Filter by level
-docker compose logs | grep ERROR
+sudo docker compose logs | grep ERROR
 ```
 
 ### Check Health
 
 ```bash
 # Docker health status
-docker inspect my-api-production | grep -A 10 Health
+sudo docker inspect my-api-production | grep -A 10 Health
 
 # Test health endpoint
 curl http://localhost:8000/health
@@ -150,7 +160,7 @@ curl http://localhost:8000/health
 ### Resource Usage
 
 ```bash
-docker stats my-api-production
+sudo docker stats my-api-production
 ```
 
 ## Extending
@@ -216,40 +226,44 @@ redis:
 
 ```bash
 # Check logs
-docker compose logs -f
+sudo docker compose logs -f
 
 # Check container status
-docker compose ps
+sudo docker compose ps
 
 # Inspect container
-docker inspect my-api-production
+sudo docker inspect my-api-production
 ```
 
 ### Health check failing
 
 ```bash
 # Test health endpoint manually
-docker compose exec api curl http://localhost:8000/health
+sudo docker compose exec api curl http://localhost:8000/health
 
 # View health status
-docker inspect my-api-production | grep -A 10 Health
+sudo docker inspect my-api-production | grep -A 10 Health
 ```
 
 ### Import errors
 
 ```bash
-# Rebuild image
-docker compose build --no-cache
+# If you're using the local build override:
+sudo docker compose -f compose.yml -f compose.local.yml build --no-cache
+
+# If you're using a pre-built image:
+sudo docker compose pull
+sudo docker compose up -d
 
 # Check Python version
-docker compose exec api python --version
+sudo docker compose exec api python --version
 ```
 
 ## Production Checklist
 
 Before deploying to production:
 
-- [ ] Set strong secrets in `.env`
+- [ ] Set strong secrets (prefer `/var/secrets/*` file mounts; avoid committing secrets in `.env`)
 - [ ] Configure `ALLOWED_ORIGINS` for CORS
 - [ ] Set `LOG_LEVEL=WARNING` (not DEBUG)
 - [ ] Test health endpoint returns 200

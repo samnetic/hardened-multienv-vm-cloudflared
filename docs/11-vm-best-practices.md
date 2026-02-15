@@ -143,7 +143,7 @@ REDIS_HOST=myapp-redis-staging
 
 ```bash
 # Database backup (daily)
-docker exec myapp-db pg_dump -U user dbname > backup.sql
+sudo docker exec myapp-db pg_dump -U user dbname > backup.sql
 
 # Volume backup (weekly)
 ./scripts/maintenance/backup-volumes.sh
@@ -236,10 +236,10 @@ services:
 ./scripts/monitoring/status.sh
 
 # Container health
-docker ps --format "table {{.Names}}\t{{.Status}}"
+sudo docker ps --format "table {{.Names}}\t{{.Status}}"
 
 # Detailed health
-docker inspect --format='{{.State.Health.Status}}' container_name
+sudo docker inspect --format='{{.State.Health.Status}}' container_name
 ```
 
 ## Updates and Maintenance
@@ -249,7 +249,8 @@ docker inspect --format='{{.State.Health.Status}}' container_name
 | What | Frequency | How |
 |------|-----------|-----|
 | Security patches | Auto-daily | unattended-upgrades |
-| Container images | Weekly/PR | `docker compose pull` |
+| cloudflared | Auto-daily | `hosting-cloudflared-upgrade.timer` (installed by `scripts/install-cloudflared.sh`) |
+| Container images | Weekly/PR | `sudo docker compose pull` |
 | Base OS upgrade | Annually | Manual, with backup |
 
 ### Zero-Downtime Updates
@@ -258,22 +259,22 @@ For critical apps:
 
 ```bash
 # 1. Pull new image
-docker compose pull
+sudo docker compose pull
 
 # 2. Scale up (if using replicas)
-docker compose up -d --scale app=2
+sudo docker compose up -d --scale app=2
 
 # 3. Wait for health check
 sleep 30
 
 # 4. Scale down old
-docker compose up -d --scale app=1
+sudo docker compose up -d --scale app=1
 ```
 
 For simpler setups:
 ```bash
 # Caddy handles brief downtime gracefully
-docker compose pull && docker compose up -d
+sudo docker compose pull && sudo docker compose up -d
 ```
 
 ### Maintenance Windows
@@ -328,29 +329,29 @@ Checklist:
 
 ```bash
 # Check logs
-docker compose logs app
+sudo docker compose logs app
 
 # Check resource limits
-docker stats --no-stream
+sudo docker stats --no-stream
 
 # Check disk space
 df -h
 
 # Check if port conflicts (rare with our setup)
-docker ps -a
+sudo docker ps -a
 ```
 
 ### App Unreachable
 
 ```bash
 # Is container running?
-docker compose ps
+sudo docker compose ps
 
 # Is it healthy?
-docker inspect --format='{{.State.Health.Status}}' container
+sudo docker inspect --format='{{.State.Health.Status}}' container
 
 # Can Caddy reach it?
-docker compose -f infra/reverse-proxy/compose.yml logs caddy
+sudo docker compose -f infra/reverse-proxy/compose.yml logs caddy
 
 # Is Cloudflare tunnel up?
 sudo systemctl status cloudflared
@@ -360,7 +361,7 @@ sudo systemctl status cloudflared
 
 ```bash
 # Find resource hogs
-docker stats
+sudo docker stats
 
 # Check system resources
 htop
@@ -373,13 +374,13 @@ htop
 
 ```bash
 # Is database container running?
-docker compose ps db
+sudo docker compose ps db
 
 # Can app container reach database?
-docker compose exec app ping db-container-name
+sudo docker compose exec app ping db-container-name
 
 # Check database logs
-docker compose logs db
+sudo docker compose logs db
 ```
 
 ## Scaling Considerations
@@ -412,7 +413,7 @@ Consider moving to managed services when:
 
 ```bash
 # Monitor actual usage over time
-docker stats --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
+sudo docker stats --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
 
 # Reduce limits for underutilized containers
 # Increase for those hitting limits
@@ -425,7 +426,7 @@ docker stats --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
 ./scripts/maintenance/docker-cleanup.sh
 
 # Full cleanup (careful in production)
-docker system prune -a --volumes
+sudo docker system prune -a --volumes
 ```
 
 ### Reserve Instances

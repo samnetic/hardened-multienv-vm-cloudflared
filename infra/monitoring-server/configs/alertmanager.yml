@@ -1,0 +1,22 @@
+# Minimal Alertmanager config (safe default: no external notifications).
+#
+# To enable notifications, add receivers (Slack, email, PagerDuty, webhook, ntfy, etc.)
+# and update the route below.
+
+global: {}
+
+route:
+  receiver: "null"
+  group_by: ["alertname", "job", "instance"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: "null"
+
+  # Example: ntfy (easy, fast alerting)
+  # - name: "ntfy"
+  #   webhook_configs:
+  #     - url: "https://ntfy.sh/<your-topic>"
+  #       send_resolved: true

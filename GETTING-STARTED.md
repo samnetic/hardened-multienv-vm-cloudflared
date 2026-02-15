@@ -7,7 +7,7 @@ Quick start guide for setting up your infrastructure on an existing VM with clou
 You already have:
 - ✅ VM running (Oracle Cloud, AWS, GCP, DigitalOcean, Hetzner, etc.)
 - ✅ Cloudflared tunnel set up
-- ✅ SSH access via tunnel (e.g., `ssh.yourdomain.com`)
+- ✅ SSH access via tunnel (recommended: short SSH alias via `scripts/setup-local-ssh.sh`)
 - ✅ Domain configured in Cloudflare
 
 ## 🚀 One-Command Setup
@@ -15,11 +15,16 @@ You already have:
 SSH to your VM and run:
 
 ```bash
-ssh sysadmin@ssh.yourdomain.com
+# From your LOCAL machine (recommended):
+# 1) Configure tunnel SSH once (creates a short alias like: ssh yourdomain)
+# curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+#
+# 2) SSH using the generated alias (first label of your domain)
+ssh yourdomain
 
 # Update template scripts
 cd /opt/hosting-blueprint
-git pull origin master
+git pull origin main
 
 # Set up infrastructure (automated)
 sudo /opt/hosting-blueprint/scripts/setup-infrastructure-repo.sh yourdomain.com myproject-infrastructure
@@ -44,10 +49,9 @@ This will:
 │   │   └── compose.yml
 │   └── monitoring/
 └── apps/                   # Your applications
-    ├── _template/         # Copy this for new apps
-    ├── myapp-dev/
-    ├── myapp-staging/
-    └── myapp-production/
+    ├── dev/
+    ├── staging/
+    └── production/
 
 /var/secrets/               # Secrets (NOT in git)
 ```
@@ -78,16 +82,16 @@ git push
 
 ```bash
 # 1. Create app from template
-cd /srv/apps
-cp -r _template myapp-production
+sudo mkdir -p /srv/apps/production
+sudo cp -r /opt/hosting-blueprint/apps/_template /srv/apps/production/myapp
 
 # 2. Configure
-cd myapp-production
+cd /srv/apps/production/myapp
 vim compose.yml  # Set image, ports, etc.
 vim .env         # Environment variables
 
 # 3. Start app
-docker compose up -d
+sudo docker compose up -d
 
 # 4. Add to Caddy
 vim /srv/infrastructure/reverse-proxy/Caddyfile
@@ -112,6 +116,15 @@ sudo /opt/hosting-blueprint/scripts/update-caddy.sh
 # 7. Test
 curl https://myapp.yourdomain.com
 ```
+
+### Included Examples
+
+This template includes ready-to-copy examples under `apps/examples/`:
+
+- `hello-world/` (static nginx demo)
+- `simple-api/` (Node.js API + hardened compose)
+- `python-fastapi/` (FastAPI app + hardened compose)
+- `postgres/` (backend-only Postgres with file-based secrets)
 
 ## 🌐 DNS Configuration
 
@@ -164,28 +177,28 @@ Complete guides in `/opt/hosting-blueprint/docs/`:
 
 ### View Caddy Logs
 ```bash
-docker compose -f /srv/infrastructure/reverse-proxy/compose.yml logs -f
+sudo docker compose -f /srv/infrastructure/reverse-proxy/compose.yml logs -f
 ```
 
 ### Restart Caddy
 ```bash
-docker compose -f /srv/infrastructure/reverse-proxy/compose.yml restart
+sudo docker compose -f /srv/infrastructure/reverse-proxy/compose.yml restart
 ```
 
 ### List Running Containers
 ```bash
-docker ps
+sudo docker ps
 ```
 
 ### Check Disk Usage
 ```bash
 df -h
-docker system df
+sudo docker system df
 ```
 
 ### Clean Up Docker
 ```bash
-docker system prune -a  # Remove unused images
+sudo docker system prune -a  # Remove unused images
 ```
 
 ## 🆘 Troubleshooting
@@ -194,12 +207,12 @@ docker system prune -a  # Remove unused images
 
 1. **Check container running:**
    ```bash
-   docker ps | grep myapp
+   sudo docker ps | grep myapp
    ```
 
 2. **Check Caddy logs:**
    ```bash
-   docker compose -f /srv/infrastructure/reverse-proxy/compose.yml logs | grep myapp
+   sudo docker compose -f /srv/infrastructure/reverse-proxy/compose.yml logs | grep myapp
    ```
 
 3. **Check DNS:**

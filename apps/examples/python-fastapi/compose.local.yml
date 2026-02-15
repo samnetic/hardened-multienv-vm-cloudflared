@@ -1,0 +1,23 @@
+# =============================================================================
+# Docker Compose Override - Local Build + Loopback Port (Optional)
+# =============================================================================
+# Use this ONLY for local/VM-side testing:
+#   sudo docker compose -f compose.yml -f compose.local.yml up -d --build
+#
+# Notes:
+# - This publishes a loopback-only port for convenience.
+# - The hardened GitOps deploy tool (hosting-deploy) denies `ports:` and `build:`
+#   by default. Do not use this override in CI/CD.
+# =============================================================================
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${APP_NAME:-my-api}:local
+
+    # Convenience only: allow curl from the VM itself.
+    ports:
+      - "127.0.0.1:8000:8000"
+

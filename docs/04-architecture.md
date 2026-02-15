@@ -12,7 +12,7 @@ Internet Users
      ↓
 ┌────────────────────────────────────────────┐
 │          Cloudflare (Free Tier)           │
-│  • SSL/TLS Termination (Flexible)          │
+│  • SSL/TLS Termination (Full)              │
 │  • DDoS Protection                         │
 │  • CDN & Caching                           │
 │  • WAF (Web Application Firewall)          │
@@ -48,7 +48,7 @@ Internet Users
 │                                            │
 │  Firewall (UFW):                          │
 │  • Port 22: CLOSED                        │
-│  • Port 80/443: Cloudflare IPs only       │
+│  • Port 80/443: CLOSED (tunnel-only)      │
 │  • Outbound: Allow all                    │
 └────────────────────────────────────────────┘
 ```
@@ -69,7 +69,7 @@ Internet Users
 - DNS management
 
 **Configuration:**
-- Encryption mode: Flexible
+- Encryption mode: Full
 - SSL/TLS: TLS 1.2+, Auto HTTPS
 - DNS: CNAME records for subdomains
 
@@ -122,10 +122,12 @@ api.domain.com        → api-production:3000
 ```
 
 **Security Features:**
-- HSTS headers
-- XSS protection
-- MIME sniffing protection
+- `tunnel_only` origin enforcement (Caddy rejects non-tunnel traffic)
+- HSTS (Strict-Transport-Security)
 - Clickjacking protection (X-Frame-Options)
+- MIME sniffing protection (X-Content-Type-Options)
+- Referrer-Policy and Permissions-Policy
+- Strips `Server` header and common `x-middleware-*` headers (Next.js defense-in-depth)
 
 ---
 
@@ -134,6 +136,8 @@ api.domain.com        → api-production:3000
 **Purpose:** Isolation between environments and services
 
 ```
+hosting-caddy-origin ←→ Caddy origin enforcement (internal; fixed subnet)
+
 staging-web      ←→  Staging apps + Caddy
 staging-backend  ←→  Staging databases (internal only)
 
@@ -190,10 +194,10 @@ healthcheck:
 2. **DNS resolves** to Cloudflare IP (CNAME)
 3. **Cloudflare CDN** checks cache
 4. **Cloudflare Tunnel** forwards to server
-5. **cloudflared** receives on localhost:80
-6. **Caddy** routes based on `Host` header
-7. **Docker app** processes request
-8. **Response** back through same path
+5. **cloudflared** forwards to `127.0.0.1:80` on the VM
+6. **Caddy** accepts tunnel-origin traffic only and routes based on `Host` header
+7. **Docker app** processes request (via env networks)
+8. **Response** returns through the same path
 
 ### SSH Connection (via Tunnel)
 
@@ -236,8 +240,8 @@ Container stdout → Docker JSON logs → /var/lib/docker/containers/
 
 **Access:**
 ```bash
-docker compose logs -f
-docker compose logs --tail=100
+sudo docker compose logs -f
+sudo docker compose logs --tail=100
 ```
 
 ---
@@ -246,7 +250,8 @@ docker compose logs --tail=100
 
 ### Network Perimeter
 - **External:** Cloudflare CDN (DDoS, WAF)
-- **Internal:** UFW firewall (Cloudflare IPs only)
+- **Internal:** UFW firewall (deny inbound; tunnel-only)
+- **Origin enforcement:** Caddy denies non-tunnel traffic (`tunnel_only`) and rejects container-to-container bypasses via `hosting-caddy-origin`
 
 ### Container Isolation
 - **Kernel:** Linux namespaces, cgroups
@@ -255,7 +260,7 @@ docker compose logs --tail=100
 
 ### User Separation
 - **sysadmin:** System configuration (sudo)
-- **appmgr:** Application deployment (no sudo)
+- **appmgr:** CI/CD deployment user (restricted SSH + limited sudo allowlist to `hosting-deploy` only)
 - **Container user:** Non-root process
 
 ### Network Segmentation
@@ -275,12 +280,12 @@ docker compose logs --tail=100
 ### Caddy Crashes
 **Impact:** All apps unreachable
 **Auto-recovery:** Docker restart policy
-**Manual:** `docker compose restart caddy`
+**Manual:** `sudo docker compose restart caddy`
 
 ### App Crashes
 **Impact:** Single app unreachable
 **Auto-recovery:** Docker restart + health checks
-**Manual:** `docker compose restart app`
+**Manual:** `sudo docker compose restart app`
 
 ### Server Reboot
 **Impact:** Temporary downtime
@@ -324,11 +329,11 @@ docker compose logs --tail=100
 | Port | Service | Access | Purpose |
 |------|---------|--------|---------|
 | 22 | SSH | Closed to public | SSH (tunnel only) |
-| 80 | Caddy | Cloudflare IPs only | HTTP routing |
-| 443 | - | Not used | Tunnel handles HTTPS |
+| 80 | Caddy | localhost only | HTTP routing (cloudflared → localhost:80) |
+| 443 | - | Not used | Cloudflare handles HTTPS at the edge |
 | 7844 | cloudflared | Outbound only | QUIC tunnel |
 
-**All inbound traffic blocked except Cloudflare IPs to port 80.**
+**All inbound traffic is blocked; traffic reaches the VM only via the outbound tunnel.**
 
 ---
 
@@ -349,13 +354,13 @@ docker compose logs --tail=100
 
 **Infrastructure:**
 - Tunnel: `systemctl status cloudflared`
-- Caddy: `docker compose ps`
+- Caddy: `sudo docker compose ps`
 - Firewall: `ufw status`
 
 **Applications:**
-- Containers: `docker ps`
-- Logs: `docker compose logs`
-- Health: `docker inspect <container> | grep Health`
+- Containers: `sudo docker ps`
+- Logs: `sudo docker compose logs`
+- Health: `sudo docker inspect <container> | grep Health`
 
 **System:**
 - Disk: `df -h`

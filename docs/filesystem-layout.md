@@ -8,7 +8,7 @@ Where to put your infrastructure files according to Linux FHS (Filesystem Hierar
 /opt/hosting-blueprint/    # Template (setup scripts, docs)
 /srv/infrastructure/       # Your infrastructure code
 /srv/apps/                 # Your running applications
-/var/secrets/              # Encrypted secrets
+/var/secrets/              # Application secrets (NOT in git)
 ```
 
 ## Linux Filesystem Hierarchy Standard (FHS)
@@ -48,7 +48,7 @@ Where to put your infrastructure files according to Linux FHS (Filesystem Hierar
 
 **Use for:**
 - Logs
-- Secrets (encrypted)
+- Secrets (sensitive)
 - Database files
 - Docker volumes
 - Caches
@@ -113,8 +113,8 @@ Where to put your infrastructure files according to Linux FHS (Filesystem Hierar
 /var/
 ├── secrets/                       # Secrets (NOT in git)
 │   ├── dev/
-│   │   ├── db_password
-│   │   └── api_key
+│   │   ├── db_password.txt
+│   │   └── api_key.txt
 │   ├── staging/
 │   └── production/
 │
@@ -159,7 +159,7 @@ git push -u origin main
 
 # 5. Start Caddy
 cd /srv/infrastructure/reverse-proxy
-docker compose up -d
+sudo docker compose up -d
 ```
 
 ## Daily Workflows
@@ -194,7 +194,7 @@ vim compose.yml
 vim .env
 
 # 3. Start app
-docker compose up -d
+sudo docker compose up -d
 
 # 4. Add to Caddy
 vim /srv/infrastructure/reverse-proxy/Caddyfile
@@ -209,12 +209,13 @@ sudo /opt/hosting-blueprint/scripts/update-caddy.sh
 # Create secret file
 /opt/hosting-blueprint/scripts/secrets/create-secret.sh production db_password
 
-# Stored at: /var/secrets/production/db_password
+# Stored at: /var/secrets/production/db_password.txt
 
 # Reference in compose.yml:
-# secrets:
-#   db_password:
-#     file: /var/secrets/production/db_password
+# group_add:
+#   - "1999"
+# volumes:
+#   - /var/secrets/production/db_password.txt:/run/secrets/db_password:ro
 ```
 
 ## Alternative Layouts
@@ -270,8 +271,8 @@ sudo /opt/hosting-blueprint/scripts/update-caddy.sh
 /srv/apps/                 → sysadmin:sysadmin (755)
 
 # Secrets (restricted)
-/var/secrets/              → sysadmin:sysadmin (700)
-/var/secrets/*/            → 600 (files), 700 (dirs)
+/var/secrets/              → root:hosting-secrets (750)
+/var/secrets/*/            → 640 (files), 750 (dirs)
 ```
 
 ### Set Permissions
@@ -286,10 +287,10 @@ sudo chown -R sysadmin:sysadmin /srv
 sudo chmod -R 755 /srv
 
 # Secrets (restricted)
-sudo chown -R sysadmin:sysadmin /var/secrets
-sudo chmod 700 /var/secrets
-sudo find /var/secrets -type f -exec chmod 600 {} \;
-sudo find /var/secrets -type d -exec chmod 700 {} \;
+sudo chown -R root:hosting-secrets /var/secrets
+sudo chmod 750 /var/secrets
+sudo find /var/secrets -type f -name '*.txt' -exec chmod 640 {} \;
+sudo find /var/secrets -type d -exec chmod 750 {} \;
 ```
 
 ## Git Repositories
@@ -298,10 +299,10 @@ sudo find /var/secrets -type d -exec chmod 700 {} \;
 
 ```bash
 cd /opt/hosting-blueprint
-git pull origin master  # Get latest scripts and docs
+git pull origin main  # Get latest scripts and docs
 ```
 
-- **Remote:** https://github.com/samnetic/hardened-multienv-vm
+- **Remote:** https://github.com/samnetic/hardened-multienv-vm-cloudflared
 - **Purpose:** Template and tools
 - **Workflow:** Pull-only (don't commit here)
 
@@ -357,7 +358,7 @@ http://static.yourdomain.com {
 | `/opt/hosting-blueprint` | Setup scripts & docs | Template (pull-only) | Nobody (read-only) |
 | `/srv/infrastructure` | Infrastructure code | Yes (your repo) | You |
 | `/srv/apps` | Application deployments | Yes (your repo) | You |
-| `/var/secrets` | Encrypted secrets | **No** (gitignored) | You (restricted) |
+| `/var/secrets` | Application secrets | **No** (outside git) | root (via scripts) |
 | `/var/lib/docker` | Docker data | No (automatic) | Docker |
 
 **Quick Commands:**
@@ -374,7 +375,7 @@ git add . && git commit -m "Update" && git push
 
 # Deploy app
 cd /srv/apps/myapp
-docker compose up -d
+sudo docker compose up -d
 ```
 
 This structure follows Linux FHS while being practical for infrastructure management.

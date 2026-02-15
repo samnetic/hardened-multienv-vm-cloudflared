@@ -21,6 +21,16 @@ NC='\033[0m'
 
 DOCKER_ONLY="${1:-}"
 
+# Docker is root-equivalent. Prefer sudo (no docker group needed).
+# We avoid prompting for a sudo password in this script; run it with sudo if needed.
+DOCKER=(docker)
+if ! docker info &>/dev/null; then
+  DOCKER=(sudo -n docker)
+  if ! "${DOCKER[@]}" info &>/dev/null; then
+    DOCKER=()
+  fi
+fi
+
 print_header() {
   echo ""
   echo -e "${BLUE}======================================================================${NC}"
@@ -74,21 +84,21 @@ fi
 # =================================================================
 print_header "Docker Disk Usage"
 
-if command -v docker &> /dev/null && docker info &> /dev/null; then
+if [ "${#DOCKER[@]}" -gt 0 ]; then
   print_section "Docker System Overview:"
-  docker system df 2>/dev/null | awk '{print "  " $0}'
+  "${DOCKER[@]}" system df 2>/dev/null | awk '{print "  " $0}'
   echo ""
 
   print_section "Docker System Detailed:"
-  docker system df -v 2>/dev/null | head -50 | awk '{print "  " $0}'
+  "${DOCKER[@]}" system df -v 2>/dev/null | head -50 | awk '{print "  " $0}'
   echo ""
 
   print_section "Images (sorted by size):"
-  docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" 2>/dev/null | head -15 | awk '{print "  " $0}'
+  "${DOCKER[@]}" images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" 2>/dev/null | head -15 | awk '{print "  " $0}'
   echo ""
 
   print_section "Volumes:"
-  docker volume ls --format "table {{.Name}}\t{{.Driver}}" 2>/dev/null | awk '{print "  " $0}'
+  "${DOCKER[@]}" volume ls --format "table {{.Name}}\t{{.Driver}}" 2>/dev/null | awk '{print "  " $0}'
   echo ""
 
   # Volume sizes (shown in docker system df -v above)
@@ -96,7 +106,7 @@ if command -v docker &> /dev/null && docker info &> /dev/null; then
   # The previous approach of spawning a container per volume was too slow.
 
   print_section "Container Sizes:"
-  docker ps -a --format "table {{.Names}}\t{{.Size}}\t{{.Status}}" 2>/dev/null | awk '{print "  " $0}'
+  "${DOCKER[@]}" ps -a --format "table {{.Names}}\t{{.Size}}\t{{.Status}}" 2>/dev/null | awk '{print "  " $0}'
   echo ""
 
   # =================================================================
@@ -105,46 +115,48 @@ if command -v docker &> /dev/null && docker info &> /dev/null; then
   print_section "Cleanup Recommendations:"
 
   # Dangling images
-  DANGLING=$(docker images -f "dangling=true" -q 2>/dev/null | wc -l)
+  DANGLING=$("${DOCKER[@]}" images -f "dangling=true" -q 2>/dev/null | wc -l)
   if [ "$DANGLING" -gt 0 ]; then
     echo -e "  ${YELLOW}⚠${NC} $DANGLING dangling images found"
-    echo "    Run: docker image prune -f"
+    echo "    Run: sudo docker image prune -f"
   else
     echo -e "  ${GREEN}✓${NC} No dangling images"
   fi
 
   # Stopped containers
-  STOPPED=$(docker ps -a -f "status=exited" -q 2>/dev/null | wc -l)
+  STOPPED=$("${DOCKER[@]}" ps -a -f "status=exited" -q 2>/dev/null | wc -l)
   if [ "$STOPPED" -gt 0 ]; then
     echo -e "  ${YELLOW}⚠${NC} $STOPPED stopped containers"
-    echo "    Run: docker container prune -f"
+    echo "    Run: sudo docker container prune -f"
   else
     echo -e "  ${GREEN}✓${NC} No stopped containers"
   fi
 
   # Unused volumes
-  UNUSED_VOL=$(docker volume ls -f "dangling=true" -q 2>/dev/null | wc -l)
+  UNUSED_VOL=$("${DOCKER[@]}" volume ls -f "dangling=true" -q 2>/dev/null | wc -l)
   if [ "$UNUSED_VOL" -gt 0 ]; then
     echo -e "  ${YELLOW}⚠${NC} $UNUSED_VOL unused volumes"
-    echo "    Run: docker volume prune -f"
+    echo "    Run: sudo docker volume prune -f"
   else
     echo -e "  ${GREEN}✓${NC} No unused volumes"
   fi
 
   # Build cache
-  BUILD_CACHE=$(docker system df --format "{{.Size}}" 2>/dev/null | tail -1)
+  BUILD_CACHE=$("${DOCKER[@]}" system df --format "{{.Size}}" 2>/dev/null | tail -1)
   if [ -n "$BUILD_CACHE" ] && [ "$BUILD_CACHE" != "0B" ]; then
     echo -e "  ${CYAN}ℹ${NC} Build cache: $BUILD_CACHE"
-    echo "    Run: docker builder prune -f"
+    echo "    Run: sudo docker builder prune -f"
   fi
 
   echo ""
-  echo "  Full cleanup: docker system prune -a --volumes"
+  echo "  Full cleanup: sudo docker system prune -a --volumes"
   echo "  (WARNING: removes all unused data)"
   echo ""
 
 else
-  echo "  Docker not running or not installed"
+  echo "  Docker not accessible as this user"
+  echo "  Run with sudo to include Docker disk usage:"
+  echo "    sudo $0"
 fi
 
 # =================================================================

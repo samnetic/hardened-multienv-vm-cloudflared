@@ -1,0 +1,53 @@
+# =================================================================
+# Monitoring Agent (Optional) - cAdvisor for Per-Container Metrics
+# =================================================================
+# This file is OPTIONAL and intentionally separate.
+#
+# Why separate?
+# - Per-container metrics require visibility into the container runtime.
+# - cAdvisor typically needs the Docker socket and host mounts (higher privilege).
+#
+# If you want the smallest blast radius:
+# - keep using infra/monitoring-agent/compose.yml only (no docker.sock)
+# - rely on node-exporter + dockerd metrics + app-level metrics
+#
+# If you want "all container metrics":
+# - enable this file AND protect the endpoint with Cloudflare Access Service Auth
+# =================================================================
+#
+# Usage:
+#   cd /srv/infrastructure/monitoring-agent
+#   sudo docker compose -f compose.yml -f compose.cadvisor.yml up -d
+# =================================================================
+
+services:
+  cadvisor:
+    image: ${CADVISOR_IMAGE:-gcr.io/cadvisor/cadvisor:v0.49.1}
+    container_name: cadvisor
+    restart: unless-stopped
+    init: true
+
+    # Hardening (best-effort; cAdvisor still has high host visibility)
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=32M,mode=1777
+    pids_limit: 300
+
+    # NOTE: docker.sock mount is equivalent to root on the host.
+    # Keep this stack protected behind Cloudflare Access Service Auth.
+    volumes:
+      - /:/rootfs:ro,rslave
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+    command:
+      - "--docker_only=true"
+
+    networks:
+      - monitoring
+

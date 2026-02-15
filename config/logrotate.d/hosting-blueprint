@@ -1,0 +1,23 @@
+# =================================================================
+# hosting-blueprint Log Rotation
+# =================================================================
+# Copy to: /etc/logrotate.d/hosting-blueprint
+#
+# Covers logs produced by cron/scripts in this blueprint.
+# =================================================================
+
+/var/log/docker-maintenance.log
+/var/log/docker-cleanup.log
+/var/log/deployments.log
+/var/log/hosting-blueprint/deployments.log
+/var/log/fail2ban-daily.log
+{
+  daily
+  rotate 14
+  missingok
+  notifempty
+  compress
+  delaycompress
+  copytruncate
+  create 0640 root adm
+}

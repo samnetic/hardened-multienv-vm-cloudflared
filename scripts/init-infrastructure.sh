@@ -6,7 +6,7 @@
 # to set up the server environment properly
 #
 # What this does:
-#   1. Verifies user is appmgr (not root)
+#   1. Verifies user is sysadmin (not root)
 #   2. Creates Docker networks for all environments
 #   3. Sets proper file permissions
 #   4. Creates application directories
@@ -14,7 +14,7 @@
 #   6. Verifies setup
 #
 # Usage:
-#   cd /opt/infrastructure
+#   cd /srv/infrastructure
 #   ./.deploy/init-infrastructure.sh
 # =================================================================
 
@@ -28,6 +28,9 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
+
+# Prefer sudo for Docker access (security-first). We detect the right invocation in verify_docker().
+DOCKER=(docker)
 
 # =================================================================
 # Helper Functions
@@ -73,24 +76,22 @@ verify_user() {
   if [ "$current_user" = "root" ]; then
     print_error "Do not run this as root!"
     echo ""
-    echo "This script should be run as appmgr:"
-    echo "  sudo su - appmgr"
-    echo "  cd /opt/infrastructure"
+    echo "This script should be run as sysadmin:"
+    echo "  su - sysadmin"
+    echo "  cd /srv/infrastructure"
     echo "  ./.deploy/init-infrastructure.sh"
     exit 1
   fi
 
-  if [ "$current_user" != "appmgr" ]; then
-    print_warning "Current user: $current_user (expected: appmgr)"
+  if [ "$current_user" != "sysadmin" ]; then
+    print_error "Current user: $current_user (expected: sysadmin)"
     echo ""
-    read -rp "Continue anyway? (yes/no): " continue_anyway
-    if [ "$continue_anyway" != "yes" ]; then
-      echo "Exiting."
-      exit 1
-    fi
-  else
-    print_success "Running as appmgr"
+    echo "Run:"
+    echo "  su - sysadmin"
+    exit 1
   fi
+
+  print_success "Running as sysadmin"
 }
 
 verify_location() {
@@ -98,10 +99,10 @@ verify_location() {
 
   local current_dir=$(pwd)
 
-  if [[ "$current_dir" != "/opt/infrastructure"* ]]; then
-    print_warning "Not in /opt/infrastructure (currently: $current_dir)"
+  if [[ "$current_dir" != "/srv/infrastructure"* ]]; then
+    print_warning "Not in /srv/infrastructure (currently: $current_dir)"
     echo ""
-    print_info "Recommended location: /opt/infrastructure"
+    print_info "Recommended location: /srv/infrastructure"
     echo ""
     read -rp "Continue anyway? (yes/no): " continue_location
     if [ "$continue_location" != "yes" ]; then
@@ -116,13 +117,19 @@ verify_location() {
 verify_docker() {
   print_step "Verifying Docker access..."
 
-  if ! docker ps &> /dev/null; then
-    print_error "Cannot access Docker"
+  if docker ps &> /dev/null; then
+    DOCKER=(docker)
+  elif sudo docker ps &> /dev/null; then
+    DOCKER=(sudo docker)
+  else
+    print_error "Cannot access Docker (docker ps and sudo docker ps both failed)"
     echo ""
     echo "Make sure:"
-    echo "  1. Docker is installed"
-    echo "  2. User is in docker group: sudo usermod -aG docker appmgr"
-    echo "  3. You've logged out and back in after adding to group"
+    echo "  1. Docker is installed and running: sudo systemctl status docker"
+    echo "  2. Your user has sudo access"
+    echo ""
+    echo "Note:"
+    echo "  Adding users to the docker group is not recommended (docker group is root-equivalent)."
     exit 1
   fi
 
@@ -137,30 +144,39 @@ create_networks() {
   print_header "Step 1/5: Create Docker Networks"
 
   local networks=(
-    "dev-web:Development environment web network"
-    "dev-db:Development environment database network"
-    "staging-web:Staging environment web network"
-    "staging-db:Staging environment database network"
-    "prod-web:Production environment web network"
-    "prod-db:Production environment database network"
-    "monitoring:Monitoring stack network (Grafana, Prometheus)"
+    "hosting-caddy-origin:Reverse proxy origin enforcement network (tunnel-only)"
+    "dev-web:Development web network (apps via Caddy)"
+    "dev-backend:Development backend network (DBs reachable from host for local dev)"
+    "staging-web:Staging web network (apps via Caddy)"
+    "staging-backend:Staging backend network (internal only)"
+    "prod-web:Production web network (apps via Caddy)"
+    "prod-backend:Production backend network (internal only)"
+    "monitoring:Monitoring stack network"
   )
 
   for network_info in "${networks[@]}"; do
     IFS=':' read -r network_name network_desc <<< "$network_info"
 
-    if docker network ls --format '{{.Name}}' | grep -q "^${network_name}$"; then
+    if "${DOCKER[@]}" network ls --format '{{.Name}}' | grep -q "^${network_name}$"; then
       print_success "Network '$network_name' already exists"
     else
       print_step "Creating network: $network_name"
-      docker network create "$network_name" --label "description=$network_desc"
+      if [ "$network_name" = "hosting-caddy-origin" ]; then
+        # Fixed-subnet internal network used so Caddy can reliably detect host->published-localhost
+        # traffic (Docker NAT shows up as the bridge gateway inside the container).
+        "${DOCKER[@]}" network create "$network_name" --internal --subnet 10.250.0.0/24 --gateway 10.250.0.1 --label "description=$network_desc"
+      elif [[ "$network_name" =~ ^(staging-backend|prod-backend)$ ]]; then
+        "${DOCKER[@]}" network create "$network_name" --internal --label "description=$network_desc"
+      else
+        "${DOCKER[@]}" network create "$network_name" --label "description=$network_desc"
+      fi
       print_success "Created network: $network_name"
     fi
   done
 
   echo ""
   print_info "Docker networks ready"
-  docker network ls | grep -E "dev-|staging-|prod-|monitoring" || true
+  "${DOCKER[@]}" network ls | grep -E "dev-|staging-|prod-|monitoring|hosting-caddy-origin" || true
 }
 
 # =================================================================
@@ -175,7 +191,6 @@ create_directories() {
     "/srv/apps/staging"
     "/srv/apps/production"
     "/srv/backups"
-    "/srv/secrets"
   )
 
   for dir in "${app_dirs[@]}"; do
@@ -184,15 +199,32 @@ create_directories() {
     else
       print_step "Creating: $dir"
       sudo mkdir -p "$dir"
-      sudo chown -R appmgr:appmgr "$dir"
+      if [[ "$dir" == "/srv/apps/"* ]]; then
+        sudo chown -R sysadmin:sysadmin "$dir" 2>/dev/null || true
+      else
+        sudo chown -R sysadmin:sysadmin "$dir" 2>/dev/null || true
+      fi
       print_success "Created: $dir"
     fi
   done
 
-  # Secure secrets directory
-  if [ -d "/srv/secrets" ]; then
-    sudo chmod 700 /srv/secrets
-    print_success "Secured /srv/secrets (700 permissions)"
+  # Secrets directory (not in git)
+  if [ ! -d "/var/secrets" ]; then
+    print_step "Creating: /var/secrets/{dev,staging,production}"
+    sudo mkdir -p /var/secrets/{dev,staging,production}
+  fi
+  local secrets_group="hosting-secrets"
+  if getent group "$secrets_group" >/dev/null 2>&1; then
+    sudo chown -R root:"$secrets_group" /var/secrets
+    sudo chmod 750 /var/secrets
+    sudo find /var/secrets -type d -exec chmod 750 {} \;
+    sudo find /var/secrets -type f -name '*.txt' -exec chmod 640 {} \; 2>/dev/null || true
+    print_success "Secured /var/secrets (root:${secrets_group}, 750 dirs, 640 files)"
+  else
+    sudo chown -R root:root /var/secrets
+    sudo chmod 700 /var/secrets
+    sudo find /var/secrets -type d -exec chmod 700 {} \;
+    print_warning "Group '$secrets_group' not found; secured /var/secrets as root-only (700)"
   fi
 }
 
@@ -203,7 +235,7 @@ create_directories() {
 set_permissions() {
   print_header "Step 3/5: Set File Permissions"
 
-  print_step "Setting ownership to appmgr..."
+  print_step "Setting ownership to sysadmin..."
 
   local current_dir=$(pwd)
 
@@ -212,7 +244,7 @@ set_permissions() {
     print_success "Already have write access to $current_dir"
   else
     print_warning "Need sudo to fix ownership"
-    sudo chown -R appmgr:appmgr "$current_dir"
+    sudo chown -R sysadmin:sysadmin "$current_dir"
     print_success "Fixed ownership"
   fi
 
@@ -230,10 +262,17 @@ set_permissions() {
 start_reverse_proxy() {
   print_header "Step 4/5: Start Reverse Proxy (Caddy)"
 
-  local caddy_dir="$PWD/infra/reverse-proxy"
+  local caddy_dir=""
+  if [ -d "$PWD/reverse-proxy" ]; then
+    caddy_dir="$PWD/reverse-proxy"
+  elif [ -d "$PWD/infra/reverse-proxy" ]; then
+    caddy_dir="$PWD/infra/reverse-proxy"
+  elif [ -d "/srv/infrastructure/reverse-proxy" ]; then
+    caddy_dir="/srv/infrastructure/reverse-proxy"
+  fi
 
-  if [ ! -d "$caddy_dir" ]; then
-    print_warning "Caddy directory not found: $caddy_dir"
+  if [ -z "$caddy_dir" ] || [ ! -d "$caddy_dir" ]; then
+    print_warning "Caddy directory not found"
     print_info "Skipping Caddy setup"
     return 0
   fi
@@ -256,25 +295,25 @@ start_reverse_proxy() {
   # Start Caddy
   print_step "Starting Caddy..."
 
-  if docker compose ps --services --filter "status=running" | grep -q caddy; then
+  if "${DOCKER[@]}" compose ps --services --filter "status=running" | grep -q caddy; then
     print_info "Caddy already running - restarting"
-    docker compose restart
+    "${DOCKER[@]}" compose restart
   else
-    docker compose up -d
+    "${DOCKER[@]}" compose up -d
   fi
 
   sleep 2
 
-  if docker compose ps --services --filter "status=running" | grep -q caddy; then
+  if "${DOCKER[@]}" compose ps --services --filter "status=running" | grep -q caddy; then
     print_success "Caddy is running"
     echo ""
-    print_info "View logs: docker compose logs -f caddy"
+    print_info "View logs: ${DOCKER[*]} compose logs -f caddy"
   else
     print_error "Caddy failed to start"
     echo ""
     print_info "Check logs:"
     echo "  cd $caddy_dir"
-    echo "  docker compose logs caddy"
+    echo "  ${DOCKER[*]} compose logs caddy"
     return 1
   fi
 }
@@ -288,7 +327,7 @@ verify_setup() {
 
   echo ""
   print_step "Checking Docker networks..."
-  local network_count=$(docker network ls | grep -cE "dev-|staging-|prod-|monitoring" || echo "0")
+  local network_count=$("${DOCKER[@]}" network ls | grep -cE "dev-|staging-|prod-|monitoring" || echo "0")
   if [ "$network_count" -ge 7 ]; then
     print_success "All Docker networks created ($network_count networks)"
   else
@@ -297,7 +336,7 @@ verify_setup() {
 
   echo ""
   print_step "Checking directories..."
-  if [ -d "/srv/apps/production" ] && [ -d "/srv/secrets" ]; then
+  if [ -d "/srv/apps/production" ] && [ -d "/var/secrets" ]; then
     print_success "Application directories created"
   else
     print_warning "Some directories missing"
@@ -305,7 +344,7 @@ verify_setup() {
 
   echo ""
   print_step "Checking Caddy..."
-  if docker ps --filter "name=caddy" --filter "status=running" | grep -q caddy; then
+  if "${DOCKER[@]}" ps --filter "name=caddy" --filter "status=running" | grep -q caddy; then
     print_success "Caddy reverse proxy is running"
   else
     print_warning "Caddy not running (may need manual start)"
@@ -362,26 +401,27 @@ main() {
   echo ""
   echo -e "${CYAN}Next Steps:${NC}"
   echo ""
-  echo -e "1. ${BOLD}Deploy Third-Party Apps${NC}"
-  echo "   cd apps/n8n && docker compose up -d"
-  echo "   cd apps/portainer && docker compose up -d"
-  echo "   cd apps/grafana && docker compose up -d"
+  echo -e "1. ${BOLD}Deploy Apps${NC}"
+  echo "   • Use the post-setup wizard:"
+  echo "     /opt/hosting-blueprint/scripts/post-setup-wizard.sh"
+  echo "   • Or copy from template into /srv/apps/<env>/<app>/"
   echo ""
-  echo -e "2. ${BOLD}Update Caddyfile${NC}"
-  echo "   nano infra/reverse-proxy/Caddyfile"
-  echo "   Add routes for your apps"
+  echo -e "2. ${BOLD}Update Caddy Routing${NC}"
+  echo "   • Edit: /srv/infrastructure/reverse-proxy/Caddyfile"
+  echo "   • Apply safely: /opt/hosting-blueprint/scripts/update-caddy.sh"
   echo ""
-  echo -e "3. ${BOLD}Reload Caddy${NC}"
-  echo "   cd infra/reverse-proxy"
-  echo "   docker compose restart"
+  echo -e "3. ${BOLD}Protect Admin Panels (Recommended)${NC}"
+  echo "   • Enable Cloudflare Zero Trust Access (SSO)"
+  echo "   • Protect: monitoring.<domain>, n8n.<domain>, admin tools"
+  echo "   • Use Service Tokens for CI/webhooks where needed"
   echo ""
-  echo -e "4. ${BOLD}Deploy Custom Apps${NC}"
-  echo "   Clone your custom app repos to /srv/apps/production/"
-  echo "   Or use GitHub Actions for automated deployment"
+  echo -e "4. ${BOLD}Set Up GitOps (Optional)${NC}"
+  echo "   • docs/07-gitops-workflow.md"
   echo ""
   echo -e "${BLUE}Documentation:${NC}"
   echo "  • docs/repository-structure.md"
-  echo "  • docs/deployment-workflow.md"
+  echo "  • docs/07-gitops-workflow.md"
+  echo "  • docs/14-cloudflare-zero-trust.md"
   echo ""
 }
 

@@ -1,0 +1,889 @@
+#!/usr/bin/env python3
+"""
+hosting-deploy (root-owned deploy helper for hosting-blueprint)
+
+Threat model / goals:
+- `appmgr` must NOT be able to run arbitrary shell commands on the VM.
+- CI/CD should still be able to sync and deploy via a very small interface.
+- All deploys run with guardrails (compose policy checks).
+
+This tool is installed to: /usr/local/sbin/hosting-deploy
+and is intended to be executed via sudo from `hosting-ci-ssh`.
+
+Subcommands:
+  sync   --env <dev|staging|production>
+         Reads a gzipped tar archive from stdin and syncs it into /srv/apps/<env>.
+
+  deploy --env <dev|staging|production> [--ref <string>]
+         Validates + deploys all apps under /srv/apps/<env> (or /srv/apps/<env>/apps).
+
+  status --env <dev|staging|production>
+         Prints a quick status summary.
+
+Policy:
+  - Deny privileged containers and host namespaces (network/pid/ipc/userns).
+  - Deny docker socket mounts.
+  - Deny device mappings.
+  - Deny bind mounts outside the app directory (relative binds must stay within)
+    except allowlisted prefixes (default: /var/secrets, /srv/static).
+  - Deny ports publishing by default (tunnel-only architecture).
+  - Deny on-host builds by default (prefer pre-built images from CI).
+
+Optional policy overrides:
+  /etc/hosting-blueprint/deploy-policy.env (root-owned)
+"""
+
+from __future__ import annotations
+
+import argparse
+import dataclasses
+import json
+import os
+import pathlib
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+
+ENV_CHOICES = ("dev", "staging", "production")
+
+DEFAULT_DEST_ROOT = "/srv/apps"
+STATE_DIR = "/var/lib/hosting-blueprint"
+LOG_DIR = "/var/log/hosting-blueprint"
+POLICY_FILE = "/etc/hosting-blueprint/deploy-policy.env"
+
+DENY_CAP_ADD = {
+    # High-risk capabilities that commonly enable host escape / kernel attack surface expansion.
+    "SYS_ADMIN",
+    "NET_ADMIN",
+    "SYS_MODULE",
+    "SYS_PTRACE",
+    "SYS_RAWIO",
+    "SYS_TIME",
+    "SYS_BOOT",
+    "SYSLOG",
+    "DAC_READ_SEARCH",
+}
+
+
+def eprint(msg: str) -> None:
+    print(msg, file=sys.stderr)
+
+
+def die(msg: str, code: int = 1) -> None:
+    eprint(f"ERROR: {msg}")
+    raise SystemExit(code)
+
+
+def run(
+    cmd: List[str],
+    *,
+    check: bool = True,
+    capture: bool = False,
+    text: bool = True,
+    env: Optional[Dict[str, str]] = None,
+    cwd: Optional[str] = None,
+) -> subprocess.CompletedProcess:
+    kwargs: Dict[str, Any] = {
+        "check": check,
+        "env": env,
+        "cwd": cwd,
+        "text": text,
+    }
+    if capture:
+        kwargs["stdout"] = subprocess.PIPE
+        kwargs["stderr"] = subprocess.PIPE
+    return subprocess.run(cmd, **kwargs)  # noqa: S603,S607
+
+
+def require_root() -> None:
+    if os.geteuid() != 0:
+        die("This command must run as root (use sudo)")
+
+
+def ensure_dirs() -> None:
+    pathlib.Path(STATE_DIR).mkdir(parents=True, exist_ok=True)
+    pathlib.Path(LOG_DIR).mkdir(parents=True, exist_ok=True)
+
+
+def now_ts() -> str:
+    return time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+
+
+def parse_env_file(path: str) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip("'").strip('"')
+                if not k:
+                    continue
+                out[k] = v
+    except FileNotFoundError:
+        return {}
+    return out
+
+
+@dataclasses.dataclass(frozen=True)
+class Policy:
+    allow_bind_prefixes: Tuple[str, ...] = ("/var/secrets", "/srv/static")
+    allow_any_ports: bool = False
+    allow_loopback_ports: bool = False
+    deny_latest_tags: bool = False
+    allow_build: bool = False
+    # Optional enforcement: require CPU+memory (and preferably pids) limits on every service.
+    require_resource_limits: bool = False
+    # Exception list: allow specific otherwise-denied caps (rare; prefer fixing the compose).
+    allow_cap_add: Tuple[str, ...] = ()
+
+    @staticmethod
+    def load() -> "Policy":
+        cfg = parse_env_file(POLICY_FILE)
+
+        def b(name: str, default: bool) -> bool:
+            v = cfg.get(name)
+            if v is None:
+                return default
+            return v.lower() in ("1", "true", "yes", "y", "on")
+
+        prefixes = cfg.get("ALLOW_BIND_PREFIXES", "")
+        allow_bind_prefixes = tuple(
+            p.strip().rstrip("/") for p in prefixes.split(",") if p.strip()
+        ) or Policy.allow_bind_prefixes
+
+        caps = cfg.get("ALLOW_CAP_ADD", "")
+        allow_cap_add = tuple(c.strip() for c in caps.split(",") if c.strip())
+
+        return Policy(
+            allow_bind_prefixes=allow_bind_prefixes,
+            allow_any_ports=b("ALLOW_ANY_PORTS", False),
+            allow_loopback_ports=b("ALLOW_LOOPBACK_PORTS", False),
+            deny_latest_tags=b("DENY_LATEST_TAGS", False),
+            allow_build=b("ALLOW_BUILD", False),
+            require_resource_limits=b("REQUIRE_RESOURCE_LIMITS", False),
+            allow_cap_add=allow_cap_add,
+        )
+
+
+def env_dest(env_name: str) -> str:
+    return os.path.join(DEFAULT_DEST_ROOT, env_name)
+
+
+def safe_realpath(path: str) -> str:
+    try:
+        return os.path.realpath(path)
+    except Exception:
+        return os.path.abspath(path)
+
+
+def is_under(child: str, parent: str) -> bool:
+    child_r = safe_realpath(child)
+    parent_r = safe_realpath(parent)
+    if child_r == parent_r:
+        return True
+    parent_prefix = parent_r.rstrip("/") + "/"
+    return child_r.startswith(parent_prefix)
+
+
+def write_log(line: str) -> None:
+    ensure_dirs()
+    log_path = os.path.join(LOG_DIR, "deployments.log")
+    ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(f"{ts} {line}\n")
+
+
+def limit_read_stdin_to_file(dst_path: str, max_bytes: int) -> int:
+    read_total = 0
+    with open(dst_path, "wb") as out:
+        while True:
+            chunk = sys.stdin.buffer.read(1024 * 1024)
+            if not chunk:
+                break
+            read_total += len(chunk)
+            if read_total > max_bytes:
+                raise ValueError(f"Archive too large (>{max_bytes} bytes)")
+            out.write(chunk)
+    return read_total
+
+
+def safe_extract_tgz(tgz_path: str, extract_dir: str) -> None:
+    base = safe_realpath(extract_dir)
+
+    def safe_path(name: str) -> str:
+        # Normalize and reject absolute paths / traversal.
+        if name.startswith("/") or name.startswith("\\"):
+            raise ValueError(f"Archive contains absolute path: {name!r}")
+        norm = os.path.normpath(name)
+        if norm.startswith("..") or norm == "..":
+            raise ValueError(f"Archive contains path traversal: {name!r}")
+        # tar can store "./file"; normalize keeps it as "file".
+        return norm.lstrip("./")
+
+    with tarfile.open(tgz_path, mode="r:gz") as tf:
+        for member in tf.getmembers():
+            # Deny links/devices/fifos to prevent symlink traversal and weirdness.
+            if member.issym() or member.islnk():
+                raise ValueError(f"Archive contains symlink/hardlink: {member.name!r}")
+            if member.ischr() or member.isblk() or member.isfifo():
+                raise ValueError(f"Archive contains special file: {member.name!r}")
+
+            norm = safe_path(member.name)
+            if not norm:
+                continue
+
+            dest = safe_realpath(os.path.join(base, norm))
+            if not is_under(dest, base):
+                raise ValueError(f"Refusing to write outside extract dir: {member.name!r}")
+
+            if member.isdir():
+                os.makedirs(dest, exist_ok=True)
+                os.chmod(dest, 0o755)
+                continue
+
+            if not member.isfile():
+                # Unknown type (sockets, etc.)
+                raise ValueError(f"Unsupported tar entry type: {member.name!r}")
+
+            parent = os.path.dirname(dest)
+            os.makedirs(parent, exist_ok=True)
+
+            fobj = tf.extractfile(member)
+            if fobj is None:
+                continue
+            # Strip suid/sgid/sticky; preserve exec bits.
+            mode = (member.mode & 0o777) & ~0o7000
+            # Avoid world-writable surprises.
+            mode &= ~0o002
+            with open(dest, "wb") as out:
+                shutil.copyfileobj(fobj, out)
+            os.chmod(dest, mode)
+
+
+def rsync_into(src: str, dst: str, owner: str = "sysadmin:sysadmin") -> None:
+    # Keep the host clean: no .git/ and no CI meta. Plaintext .env stays on host.
+    filters = [
+        "--exclude=.git/",
+        "--exclude=.github/",
+        "--filter=+ .env.example",
+        "--filter=+ .env.*.example",
+        "--filter=+ .env.*.enc",
+        "--filter=- .env",
+        "--filter=- .env.*",
+    ]
+    cmd = [
+        "rsync",
+        "-a",
+        "--delete",
+        "--checksum",
+        f"--chown={owner}",
+        "--chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r",
+    ] + filters + [src.rstrip("/") + "/", dst.rstrip("/") + "/"]
+    run(cmd, check=True, capture=True)
+
+
+def detect_apps_root(deploy_root: str) -> str:
+    apps_dir = os.path.join(deploy_root, "apps")
+    if not os.path.isdir(apps_dir):
+        return deploy_root
+    for root, _dirs, files in os.walk(apps_dir):
+        for f in files:
+            if f in ("compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"):
+                return apps_dir
+    return deploy_root
+
+
+def find_compose_base(app_dir: str) -> Optional[str]:
+    for name in ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"):
+        p = os.path.join(app_dir, name)
+        if os.path.isfile(p):
+            return name
+    return None
+
+
+def find_compose_override(app_dir: str, env_name: str) -> Optional[str]:
+    suffix = env_name
+    candidates = (
+        f"compose.{suffix}.yaml",
+        f"compose.{suffix}.yml",
+        f"docker-compose.{suffix}.yaml",
+        f"docker-compose.{suffix}.yml",
+    )
+    for name in candidates:
+        p = os.path.join(app_dir, name)
+        if os.path.isfile(p):
+            return name
+    return None
+
+
+def find_env_file(app_dir: str, env_name: str) -> Optional[str]:
+    p = os.path.join(app_dir, f".env.{env_name}")
+    if os.path.isfile(p):
+        return p
+    p = os.path.join(app_dir, ".env")
+    if os.path.isfile(p):
+        return p
+    return None
+
+
+def maybe_decrypt_dotenv(enc_path: str, out_path: str) -> None:
+    if not os.path.isfile(enc_path):
+        return
+    if os.path.isfile(out_path) and os.path.getmtime(out_path) >= os.path.getmtime(enc_path):
+        return
+
+    if shutil.which("sops") is None:
+        die(f"sops not installed but encrypted env exists: {enc_path}")
+
+    key_file = os.environ.get("SOPS_AGE_KEY_FILE", "/etc/sops/age/keys.txt")
+    if not os.path.isfile(key_file):
+        die(f"Missing age key file: {key_file} (needed to decrypt {enc_path})")
+
+    tmp_out = f"{out_path}.tmp.{os.getpid()}"
+    os.umask(0o077)
+    env = os.environ.copy()
+    env["SOPS_AGE_KEY_FILE"] = key_file
+    cmd = [
+        "sops",
+        "--decrypt",
+        "--input-type",
+        "dotenv",
+        "--output-type",
+        "dotenv",
+        enc_path,
+    ]
+    proc = run(cmd, check=True, capture=True, env=env, text=False)
+    with open(tmp_out, "wb") as f:
+        f.write(proc.stdout or b"")
+    os.chmod(tmp_out, 0o640)
+    shutil.move(tmp_out, out_path)
+
+
+def docker_compose_config_json(compose_args: List[str]) -> Dict[str, Any]:
+    attempts: List[List[str]] = [
+        ["docker", "compose"] + compose_args + ["config", "--no-interpolate", "--format", "json"],
+        ["docker", "compose"] + compose_args + ["config", "--format", "json"],
+        ["docker", "compose"] + compose_args + ["convert", "--format", "json"],
+    ]
+    for cmd in attempts:
+        proc = run(cmd, check=False, capture=True)
+        if proc.returncode == 0 and (proc.stdout or "").strip().startswith("{"):
+            return json.loads(proc.stdout)
+
+    # Fallback: YAML output from config/convert.
+    yaml_cmds: List[List[str]] = [
+        ["docker", "compose"] + compose_args + ["config", "--no-interpolate"],
+        ["docker", "compose"] + compose_args + ["config"],
+        ["docker", "compose"] + compose_args + ["convert"],
+    ]
+    for cmd in yaml_cmds:
+        proc = run(cmd, check=False, capture=True)
+        if proc.returncode != 0:
+            continue
+        try:
+            import yaml  # type: ignore
+        except Exception:
+            die("Compose JSON output not supported and PyYAML missing. Install python3-yaml.")
+        return yaml.safe_load(proc.stdout)  # type: ignore
+
+    die("Unable to render compose config (docker compose config failed)")
+    return {}
+
+
+def iter_service_dicts(cfg: Dict[str, Any]) -> Iterable[Tuple[str, Dict[str, Any]]]:
+    services = cfg.get("services") or {}
+    if not isinstance(services, dict):
+        return []
+    return services.items()
+
+
+def parse_ports(ports: Any) -> List[str]:
+    if ports is None:
+        return []
+    if isinstance(ports, list):
+        out: List[str] = []
+        for p in ports:
+            if isinstance(p, str):
+                out.append(p)
+            elif isinstance(p, dict):
+                # Compose may normalize ports to objects.
+                published = str(p.get("published") or "")
+                target = str(p.get("target") or "")
+                host_ip = str(p.get("host_ip") or p.get("host_ip") or p.get("host_ip") or "")
+                proto = str(p.get("protocol") or "tcp")
+                s = ""
+                if host_ip:
+                    s += f"{host_ip}:"
+                if published:
+                    s += f"{published}:"
+                s += f"{target}/{proto}"
+                out.append(s)
+        return out
+    if isinstance(ports, str):
+        return [ports]
+    return []
+
+
+def normalize_volume_entry(v: Any) -> Tuple[Optional[str], Optional[str], Optional[str], bool]:
+    # returns (source, target, mode, read_only)
+    if isinstance(v, str):
+        parts = v.split(":")
+        if len(parts) == 1:
+            return None, parts[0], None, False
+        source = parts[0]
+        target = parts[1]
+        mode = ":".join(parts[2:]) if len(parts) > 2 else None
+        ro = mode is not None and ("ro" in mode.split(","))
+        return source, target, mode, ro
+    if isinstance(v, dict):
+        source = v.get("source") or v.get("src")
+        target = v.get("target") or v.get("dst") or v.get("destination")
+        read_only = bool(v.get("read_only") or v.get("readonly") or False)
+        mode = v.get("mode")
+        if not read_only and isinstance(mode, str) and "ro" in mode.split(","):
+            read_only = True
+        return str(source) if source else None, str(target) if target else None, str(mode) if mode else None, read_only
+    return None, None, None, False
+
+
+def is_bind_source(source: str) -> bool:
+    return source.startswith(("/", "./", "../", "~")) or source.startswith(".")
+
+
+def policy_check(policy: Policy, app_dir: str, cfg: Dict[str, Any]) -> None:
+    app_dir_r = safe_realpath(app_dir)
+
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    for svc_name, svc in iter_service_dicts(cfg):
+        if not isinstance(svc, dict):
+            continue
+
+        if svc.get("privileged") is True:
+            errors.append(f"{svc_name}: privileged containers are not allowed")
+
+        for key in ("network_mode", "pid", "ipc", "userns_mode"):
+            v = svc.get(key)
+            if isinstance(v, str) and v.strip().lower() == "host":
+                errors.append(f"{svc_name}: {key}=host is not allowed")
+
+        sec_opts = svc.get("security_opt") or []
+        if isinstance(sec_opts, list):
+            have_nnp = False
+            for opt in sec_opts:
+                if not isinstance(opt, str):
+                    continue
+                low = opt.lower()
+                if low.strip() == "no-new-privileges:true":
+                    have_nnp = True
+                if "unconfined" in low:
+                    errors.append(f"{svc_name}: security_opt contains 'unconfined' ({opt})")
+            if not have_nnp:
+                warnings.append(
+                    f"{svc_name}: missing security_opt 'no-new-privileges:true' (recommended hardening)"
+                )
+        elif sec_opts:
+            warnings.append(
+                f"{svc_name}: security_opt should be a list; unable to verify no-new-privileges setting"
+            )
+
+        cap_drop = svc.get("cap_drop") or []
+        if isinstance(cap_drop, list):
+            have_drop_all = any(isinstance(c, str) and c.strip().upper() == "ALL" for c in cap_drop)
+            if not have_drop_all:
+                warnings.append(
+                    f"{svc_name}: missing cap_drop: [ALL] (recommended; add back only required caps)"
+                )
+        elif cap_drop:
+            warnings.append(f"{svc_name}: cap_drop should be a list; unable to verify capability drops")
+
+        if svc.get("devices"):
+            errors.append(f"{svc_name}: devices mappings are not allowed")
+
+        caps = svc.get("cap_add") or []
+        if isinstance(caps, list) and caps:
+            for cap in caps:
+                if not isinstance(cap, str):
+                    continue
+                cap_u = cap.strip().upper()
+                if cap_u == "ALL":
+                    errors.append(f"{svc_name}: cap_add ALL is not allowed")
+                    continue
+                if cap_u in DENY_CAP_ADD and cap_u not in tuple(c.upper() for c in policy.allow_cap_add):
+                    errors.append(
+                        f"{svc_name}: cap_add '{cap_u}' is denied (override via ALLOW_CAP_ADD={cap_u} only if you fully understand the risk)"
+                    )
+
+        img = svc.get("image")
+        if isinstance(img, str):
+            if policy.deny_latest_tags:
+                # Deny implicit latest (no ':') and explicit ':latest'
+                if ":" not in img or img.endswith(":latest"):
+                    errors.append(f"{svc_name}: image tag must be pinned (DENY_LATEST_TAGS enabled)")
+            else:
+                if ":" not in img or img.endswith(":latest"):
+                    warnings.append(f"{svc_name}: image '{img}' is not pinned (prefer version tag or digest)")
+
+        if svc.get("build") is not None and not policy.allow_build:
+            errors.append(
+                f"{svc_name}: build directives are denied (prefer pre-built images). Override via ALLOW_BUILD=1 only if you fully understand the risk."
+            )
+
+        if svc.get("read_only") is not True:
+            warnings.append(
+                f"{svc_name}: read_only is not enabled (recommended when possible; use tmpfs/volumes for writable paths)"
+            )
+
+        if svc.get("healthcheck") is None:
+            warnings.append(
+                f"{svc_name}: missing healthcheck (recommended to detect crash/boot loops and improve reliability)"
+            )
+
+        restart = svc.get("restart")
+        if restart is None:
+            warnings.append(
+                f"{svc_name}: missing restart policy (recommended: restart: unless-stopped)"
+            )
+
+        if svc.get("init") is not True:
+            warnings.append(
+                f"{svc_name}: init is not enabled (recommended to reap zombies; set init: true)"
+            )
+
+        ports = parse_ports(svc.get("ports"))
+        if ports:
+            if not policy.allow_any_ports:
+                errors.append(
+                    f"{svc_name}: ports publishing is denied (tunnel-only). Remove 'ports:' and route via Caddy."
+                )
+            else:
+                # Still deny public binds; optionally allow loopback binds.
+                for p in ports:
+                    if re.search(r"(0\\.0\\.0\\.0:|\\[::\\]:|:::)", p):
+                        errors.append(f"{svc_name}: public port publishing detected: {p}")
+                    if (not policy.allow_loopback_ports) and re.search(r"(127\\.0\\.0\\.1:|\\[::1\\]:)", p):
+                        errors.append(f"{svc_name}: loopback ports require ALLOW_LOOPBACK_PORTS=1: {p}")
+
+        # Resource limits (DoS hardening).
+        #
+        # Note: `docker compose` (non-swarm) ignores `deploy.resources` unless `--compatibility`
+        # is used. This blueprint deploy path uses `--compatibility` automatically, but we
+        # still validate that limits are present to keep the compose files production-grade.
+        have_cpu = False
+        have_mem = False
+        have_pids = False
+
+        if svc.get("cpus") is not None:
+            have_cpu = True
+        if svc.get("mem_limit") is not None:
+            have_mem = True
+        if svc.get("pids_limit") is not None:
+            have_pids = True
+
+        dep = svc.get("deploy") or {}
+        if isinstance(dep, dict):
+            res = dep.get("resources") or {}
+            if isinstance(res, dict):
+                lim = res.get("limits") or {}
+                if isinstance(lim, dict):
+                    if lim.get("cpus") is not None:
+                        have_cpu = True
+                    if lim.get("memory") is not None:
+                        have_mem = True
+                    if lim.get("pids") is not None:
+                        have_pids = True
+
+        missing_hard: List[str] = []
+        if not have_cpu:
+            missing_hard.append("cpu")
+        if not have_mem:
+            missing_hard.append("memory")
+
+        if missing_hard:
+            msg = (
+                f"{svc_name}: missing resource limits ({', '.join(missing_hard)}). "
+                "Add CPU/memory limits to reduce container DoS risk."
+            )
+            if policy.require_resource_limits:
+                errors.append(msg)
+            else:
+                warnings.append(msg)
+
+        if not have_pids:
+            warnings.append(
+                f"{svc_name}: missing pids limit (set pids_limit) - recommended to reduce fork-bomb risk"
+            )
+
+        vols = svc.get("volumes") or []
+        if isinstance(vols, list):
+            for v in vols:
+                source, target, mode, ro = normalize_volume_entry(v)
+                if not source or not target:
+                    continue
+
+                # Deny docker socket mount, regardless of form.
+                if source == "/var/run/docker.sock" or target == "/var/run/docker.sock":
+                    errors.append(f"{svc_name}: docker socket mount is not allowed")
+                    continue
+
+                if not is_bind_source(source):
+                    # named or anonymous volume
+                    continue
+
+                # Resolve host path for bind mounts.
+                host_path = os.path.expanduser(source)
+                if not host_path.startswith("/"):
+                    host_path = os.path.join(app_dir_r, host_path)
+                host_path_r = safe_realpath(host_path)
+
+                # Must be within app_dir, or within allowlisted prefixes.
+                allowed = False
+                if is_under(host_path_r, app_dir_r):
+                    allowed = True
+                else:
+                    for prefix in policy.allow_bind_prefixes:
+                        if host_path_r == prefix or host_path_r.startswith(prefix.rstrip("/") + "/"):
+                            allowed = True
+                            break
+
+                if not allowed:
+                    errors.append(
+                        f"{svc_name}: bind mount source '{source}' resolves to '{host_path_r}' which is outside allowlist"
+                    )
+                    continue
+
+                # Enforce /var/secrets mounts are read-only.
+                if host_path_r.startswith("/var/secrets/") and not ro:
+                    errors.append(f"{svc_name}: /var/secrets mounts must be read-only (:ro)")
+
+    if warnings:
+        for w in warnings:
+            eprint(f"WARN: {w}")
+
+    if errors:
+        for e in errors:
+            eprint(f"POLICY: {e}")
+        die("Compose policy check failed")
+
+
+def check_required_secrets(app_dir: str, files: List[str]) -> None:
+    missing: List[str] = []
+    pat = re.compile(r"/var/secrets/[^\\s:\\\"]+\\.txt")
+    for rel in files:
+        p = os.path.join(app_dir, rel)
+        if not os.path.isfile(p):
+            continue
+        try:
+            with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+        except Exception:
+            continue
+        for m in sorted(set(pat.findall(content))):
+            if not os.path.isfile(m):
+                missing.append(f"{m} (referenced in {rel})")
+    if missing:
+        eprint("")
+        for m in missing:
+            eprint(f"MISSING SECRET: {m}")
+        die("Required /var/secrets/*.txt file(s) missing")
+
+
+def deploy_env(env_name: str, ref: str | None, policy: Policy) -> None:
+    root = env_dest(env_name)
+    if not os.path.isdir(root):
+        die(f"Deploy root not found: {root} (run sync first)")
+
+    if shutil.which("docker") is None:
+        die("docker not installed")
+
+    # docker daemon must be running
+    if run(["docker", "info"], check=False).returncode != 0:
+        die("docker daemon not running")
+
+    apps_root = detect_apps_root(root)
+    app_dirs = [
+        os.path.join(apps_root, d)
+        for d in sorted(os.listdir(apps_root))
+        if os.path.isdir(os.path.join(apps_root, d)) and not d.startswith(".")
+    ]
+    if not app_dirs:
+        print(f"No app directories found under {apps_root} (nothing to deploy).")
+        return
+
+    write_log(f"deploy env={env_name} ref={ref or ''} apps_root={apps_root}")
+    print(f"=== Deploying env={env_name} ref={ref or ''} ===")
+    print(f"Apps root: {apps_root}")
+
+    for app_dir in app_dirs:
+        app_name = os.path.basename(app_dir)
+        base = find_compose_base(app_dir)
+        if base is None:
+            print(f"SKIP: {app_name} (no compose file)")
+            continue
+
+        # SOPS dotenv decrypt (optional).
+        maybe_decrypt_dotenv(os.path.join(app_dir, f".env.{env_name}.enc"), os.path.join(app_dir, f".env.{env_name}"))
+        maybe_decrypt_dotenv(os.path.join(app_dir, ".env.enc"), os.path.join(app_dir, ".env"))
+
+        override = find_compose_override(app_dir, env_name)
+        env_file = find_env_file(app_dir, env_name)
+
+        compose_args: List[str] = ["--project-directory", app_dir]
+        if env_file:
+            compose_args += ["--env-file", env_file]
+        compose_args += ["-f", os.path.join(app_dir, base)]
+        files_to_scan = [base]
+        if override:
+            compose_args += ["-f", os.path.join(app_dir, override)]
+            files_to_scan.append(override)
+
+        print("")
+        print(f">>> App: {app_name}")
+        print(f"    Base:     {base}")
+        print(f"    Override: {override or 'none'}")
+        print(f"    Env file: {os.path.basename(env_file) if env_file else 'none'}")
+
+        check_required_secrets(app_dir, files_to_scan)
+
+        cfg = docker_compose_config_json(compose_args)
+        policy_check(policy, app_dir, cfg)
+
+        # Pull images best-effort. (Do not fail deploy if registry is transient.)
+        #
+        # Note: we use `--compatibility` for `up` to ensure deploy.resources limits are
+        # actually applied by docker compose (non-swarm).
+        run(["docker", "compose"] + compose_args + ["pull"], check=False)
+
+        # Apply
+        run(
+            ["docker", "compose", "--compatibility"] + compose_args + ["up", "-d", "--remove-orphans"],
+            check=True,
+        )
+        run(["docker", "compose"] + compose_args + ["ps"], check=False)
+
+    print("")
+    print("=== Post-check: container port exposure (tunnel-only) ===")
+    if os.path.isfile("/opt/scripts/check-docker-exposed-ports.sh") and os.access(
+        "/opt/scripts/check-docker-exposed-ports.sh", os.X_OK
+    ):
+        run(["/opt/scripts/check-docker-exposed-ports.sh"], check=False)
+    else:
+        print("WARN: /opt/scripts/check-docker-exposed-ports.sh missing (install via setup-vm.sh)")
+
+    print("")
+    print("=== Deployment complete ===")
+    run(["docker", "ps", "--format", "table {{.Names}}\t{{.Status}}\t{{.Ports}}"], check=False)
+
+
+def sync_env(env_name: str, policy: Policy, max_bytes: int) -> None:
+    dest = env_dest(env_name)
+    pathlib.Path(dest).mkdir(parents=True, exist_ok=True)
+    ensure_dirs()
+
+    # Receive archive from stdin into a temp file with a size cap.
+    with tempfile.TemporaryDirectory(prefix=f"hosting-sync-{env_name}-", dir=STATE_DIR) as tmp:
+        tgz_path = os.path.join(tmp, "sync.tgz")
+        extract_dir = os.path.join(tmp, "extract")
+        os.makedirs(extract_dir, exist_ok=True)
+
+        try:
+            total = limit_read_stdin_to_file(tgz_path, max_bytes)
+        except ValueError as exc:
+            die(str(exc))
+
+        if total == 0:
+            die("No data received on stdin (expected a tar.gz stream)")
+
+        write_log(f"sync env={env_name} bytes={total}")
+
+        try:
+            safe_extract_tgz(tgz_path, extract_dir)
+        except Exception as exc:
+            die(f"Failed to extract archive safely: {exc}")
+
+        # If archive extracts into a single top-level folder, use it as src.
+        entries = [e for e in os.listdir(extract_dir) if e not in (".", "..")]
+        src_root = extract_dir
+        if len(entries) == 1 and os.path.isdir(os.path.join(extract_dir, entries[0])):
+            src_root = os.path.join(extract_dir, entries[0])
+
+        # Keep /srv/apps owned by sysadmin for ergonomic on-host debugging.
+        rsync_into(src_root, dest, owner="sysadmin:sysadmin")
+
+        # Ensure base directory perms are sane (best-effort).
+        try:
+            shutil.chown(dest, user="sysadmin", group="sysadmin")
+            os.chmod(dest, 0o755)
+        except Exception:
+            pass
+
+        print(f"Synced to {dest}")
+
+
+def status_env(env_name: str) -> None:
+    dest = env_dest(env_name)
+    print(f"=== Status env={env_name} ({dest}) ===")
+    if not os.path.isdir(dest):
+        print("No deployment directory found.")
+        return
+    run(["docker", "ps", "--format", "table {{.Names}}\t{{.Status}}\t{{.Ports}}"], check=False)
+    if os.path.isfile("/opt/scripts/check-docker-exposed-ports.sh") and os.access(
+        "/opt/scripts/check-docker-exposed-ports.sh", os.X_OK
+    ):
+        run(["/opt/scripts/check-docker-exposed-ports.sh"], check=False)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="hosting-deploy")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    psync = sub.add_parser("sync", help="Sync an archive (tar.gz) from stdin into /srv/apps/<env>")
+    psync.add_argument("--env", required=True, choices=ENV_CHOICES)
+    psync.add_argument("--max-bytes", type=int, default=200 * 1024 * 1024)
+
+    pdep = sub.add_parser("deploy", help="Deploy apps for an environment under /srv/apps/<env>")
+    pdep.add_argument("--env", required=True, choices=ENV_CHOICES)
+    pdep.add_argument("--ref", required=False)
+
+    pstat = sub.add_parser("status", help="Print a quick status summary")
+    pstat.add_argument("--env", required=True, choices=ENV_CHOICES)
+
+    return p
+
+
+def main() -> int:
+    require_root()
+    ensure_dirs()
+    policy = Policy.load()
+
+    args = build_parser().parse_args()
+
+    if args.cmd == "sync":
+        sync_env(args.env, policy, args.max_bytes)
+        return 0
+    if args.cmd == "deploy":
+        deploy_env(args.env, args.ref, policy)
+        return 0
+    if args.cmd == "status":
+        status_env(args.env)
+        return 0
+
+    die("Unknown command")
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

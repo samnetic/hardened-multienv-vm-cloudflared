@@ -1,0 +1,72 @@
+# =================================================================
+# Monitoring Agent (Security-First)
+# =================================================================
+# Goal:
+# - Provide host + Docker metrics WITHOUT mounting docker.sock
+# - Keep everything internal (no published ports)
+# - Expose via Caddy + Cloudflare Access (service token) if needed
+# =================================================================
+
+services:
+  node-exporter:
+    image: ${NODE_EXPORTER_IMAGE:-prom/node-exporter:v1.8.1}
+    container_name: node-exporter
+    restart: unless-stopped
+    init: true
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=32M,mode=1777
+
+    pids_limit: 100
+
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host:ro,rslave
+
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/host"
+      - "--web.listen-address=:9100"
+      # Reduce noise; keep it simple and safe.
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|run)($$|/)"
+
+    networks:
+      - monitoring
+
+  dockerd-metrics-proxy:
+    # Proxies Docker daemon metrics (dockerd --metrics-addr=0.0.0.0:9323)
+    # into the monitoring network, without docker.sock.
+    image: ${DOCKER_METRICS_PROXY_IMAGE:-nginx:1.27-alpine}
+    container_name: dockerd-metrics-proxy
+    restart: unless-stopped
+    init: true
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=16M,mode=1777
+
+    pids_limit: 100
+
+    volumes:
+      - ./configs/nginx.conf:/etc/nginx/nginx.conf:ro
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    external: true

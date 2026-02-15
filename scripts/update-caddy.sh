@@ -4,8 +4,8 @@
 # Validates config before applying, with automatic rollback on failure
 #
 # Usage:
-#   ./scripts/update-caddy.sh                              # Uses /opt/infrastructure
-#   ./scripts/update-caddy.sh /opt/infrastructure/infra/reverse-proxy
+#   ./scripts/update-caddy.sh                              # Uses /srv/infrastructure (recommended)
+#   ./scripts/update-caddy.sh /srv/infrastructure/reverse-proxy
 #   ./scripts/update-caddy.sh /custom/path/to/caddy
 #
 # This script:
@@ -28,8 +28,6 @@ if [ -n "${1:-}" ]; then
   CADDY_DIR="$1"
 elif [ -d "/srv/infrastructure/reverse-proxy" ]; then
   CADDY_DIR="/srv/infrastructure/reverse-proxy"
-elif [ -d "/opt/infrastructure/infra/reverse-proxy" ]; then
-  CADDY_DIR="/opt/infrastructure/infra/reverse-proxy"
 elif [ -d "/opt/hosting-blueprint/infra/reverse-proxy" ]; then
   CADDY_DIR="/opt/hosting-blueprint/infra/reverse-proxy"
   echo -e "${YELLOW}⚠ Using template directory. Consider using /srv/infrastructure instead.${NC}"
@@ -37,7 +35,6 @@ else
   echo -e "${RED}✗ Cannot find Caddy directory${NC}"
   echo "Checked:"
   echo "  - /srv/infrastructure/reverse-proxy"
-  echo "  - /opt/infrastructure/infra/reverse-proxy"
   echo "  - /opt/hosting-blueprint/infra/reverse-proxy"
   echo ""
   echo "Usage: $0 [CADDY_DIR]"
@@ -51,6 +48,21 @@ print_step() { echo -e "${BLUE}➜${NC} $1"; }
 print_success() { echo -e "${GREEN}✓${NC} $1"; }
 print_warning() { echo -e "${YELLOW}⚠${NC} $1"; }
 print_error() { echo -e "${RED}✗${NC} $1"; }
+
+# Prefer a security-first model: humans are not in the docker group.
+# If docker isn't directly accessible, fall back to sudo.
+DOCKER=(docker)
+if ! command -v docker >/dev/null 2>&1; then
+  print_error "Docker is not installed"
+  exit 1
+fi
+if ! docker info >/dev/null 2>&1; then
+  DOCKER=(sudo docker)
+fi
+
+compose() {
+  "${DOCKER[@]}" compose "$@"
+}
 
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}  Safe Caddy Configuration Update${NC}"
@@ -79,7 +91,7 @@ print_success "Backup saved to: $BACKUP_FILE"
 # Validate syntax
 print_step "Validating Caddyfile syntax..."
 
-if docker run --rm -v "$CADDYFILE:/etc/caddy/Caddyfile:ro" caddy:latest caddy validate --config /etc/caddy/Caddyfile 2>&1; then
+if "${DOCKER[@]}" run --rm --network none -v "$CADDYFILE:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile 2>&1; then
   print_success "Configuration is valid!"
 else
   print_error "Configuration has errors!"
@@ -90,10 +102,10 @@ else
 fi
 
 # Check if Caddy container is running
-if ! docker compose -f "$CADDY_DIR/compose.yml" ps | grep -q "caddy.*Up"; then
+if ! compose -f "$CADDY_DIR/compose.yml" ps | grep -q "caddy.*Up"; then
   print_warning "Caddy is not running. Starting it now..."
   cd "$CADDY_DIR"
-  docker compose up -d
+  compose up -d
   print_success "Caddy started"
   exit 0
 fi
@@ -102,20 +114,20 @@ fi
 print_step "Reloading Caddy configuration (zero downtime)..."
 
 cd "$CADDY_DIR"
-if docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile 2>&1; then
+if compose exec caddy caddy reload --config /etc/caddy/Caddyfile 2>&1; then
   print_success "Caddy reloaded successfully!"
 
   # Wait a moment for reload to complete
   sleep 2
 
   # Verify it's still running
-  if docker compose ps | grep -q "caddy.*Up"; then
+  if compose ps | grep -q "caddy.*Up"; then
     print_success "Caddy is running and healthy"
 
     # Show recent logs
     echo
     print_step "Recent logs:"
-    docker compose logs caddy --tail 10
+    compose logs caddy --tail 10
 
     # Keep only last 10 backups
     print_step "Cleaning old backups (keeping last 10)..."
@@ -131,14 +143,14 @@ if docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile 2>&1; th
 
     # Restore backup
     cp "$BACKUP_FILE" "$CADDYFILE"
-    docker compose up -d
+    compose up -d
 
-    print_error "Rollback complete. Check logs: docker compose logs caddy"
+    print_error "Rollback complete. Check logs: sudo docker compose logs caddy"
     exit 1
   fi
 else
   print_error "Reload failed!"
   print_warning "Caddy is still running with the old configuration"
-  print_warning "To rollback: cp $BACKUP_FILE $CADDYFILE && docker compose restart caddy"
+  print_warning "To rollback: cp $BACKUP_FILE $CADDYFILE && sudo docker compose restart caddy"
   exit 1
 fi

@@ -1,0 +1,11 @@
+[Unit]
+Description=hosting-blueprint: Daily cloudflared upgrades
+
+[Timer]
+OnCalendar=*-*-* 03:45:00
+RandomizedDelaySec=45m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+

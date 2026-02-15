@@ -6,16 +6,15 @@
 
 services:
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: ${APP_NAME:-my-api}:latest
+    # Security-first default: deploy pre-built images (GitOps-friendly).
+    # For local/VM-side builds and loopback port publishing, use compose.local.yml.
+    image: ${IMAGE:-ghcr.io/your-org/my-api:1.0.0}
     container_name: ${APP_NAME:-my-api}-${ENVIRONMENT:-production}
     restart: unless-stopped
+    init: true
 
-    # Port mapping (internal only, Caddy handles external)
-    ports:
-      - "8000:8000"
+    # No published ports (tunnel-only threat model).
+    # Expose via Caddy on the shared Docker network instead.
 
     # Environment variables
     environment:
@@ -41,6 +40,9 @@ services:
     # cap_add:
     #   - NET_BIND_SERVICE  # Only if binding to port < 1024
 
+    # Fork-bomb protection
+    pids_limit: 200
+
     # Resource limits
     deploy:
       resources:
@@ -53,7 +55,8 @@ services:
 
     # Health check
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      # Avoid depending on curl/wget being present in the image.
+      test: ["CMD", "python", "-c", "import sys,urllib.request; r=urllib.request.urlopen('http://localhost:8000/health'); sys.exit(0 if getattr(r,'status',200)==200 else 1)"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -61,16 +64,18 @@ services:
 
     # Logging
     logging:
-      driver: "json-file"
+      driver: "local"
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: "20m"
+        max-file: "5"
 
 # =============================================================================
 # Networks
 # =============================================================================
 
 networks:
+  dev-web:
+    external: true
   prod-web:
     external: true
   staging-web:
@@ -89,10 +94,16 @@ networks:
 #   ✅ Logging limits - Prevents disk exhaustion
 #
 # Usage:
-#   docker compose up -d           # Start in detached mode
-#   docker compose logs -f         # View logs
-#   docker compose ps              # Check status
-#   docker compose down            # Stop and remove
-#   docker compose restart         # Restart services
+#   # Pre-built image:
+#   sudo docker compose pull
+#   sudo docker compose up -d
+#
+#   # Local/VM-side build (convenience only):
+#   sudo docker compose -f compose.yml -f compose.local.yml up -d --build
+#
+#   sudo docker compose logs -f         # View logs
+#   sudo docker compose ps              # Check status
+#   sudo docker compose down            # Stop and remove
+#   sudo docker compose restart         # Restart services
 #
 # =============================================================================

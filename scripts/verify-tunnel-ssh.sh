@@ -113,7 +113,7 @@ else
   print_fail "cloudflared not found. Install it first."
   echo ""
   echo "Installation:"
-  echo "  Debian/Ubuntu: curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb && sudo dpkg -i cloudflared.deb"
+  echo "  Debian/Ubuntu: install via official repo: https://pkg.cloudflare.com/cloudflared"
   echo "  macOS: brew install cloudflared"
   echo ""
   exit 1

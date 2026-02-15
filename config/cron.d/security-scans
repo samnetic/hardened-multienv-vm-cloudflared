@@ -1,0 +1,25 @@
+# =================================================================
+# Security Scans Cron Jobs
+# =================================================================
+# Copy to: /etc/cron.d/security-scans
+#
+# This file is installed by: scripts/security/setup-security-tools.sh
+# =================================================================
+# Format: minute hour day month weekday user command
+# =================================================================
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# Daily AIDE integrity check (04:00)
+0 4 * * * root test -x /opt/scripts/hosting-aide-check.sh && /opt/scripts/hosting-aide-check.sh
+
+# Weekly rkhunter scan (Sunday 03:00)
+0 3 * * 0 root test -x /opt/scripts/hosting-rkhunter-check.sh && /opt/scripts/hosting-rkhunter-check.sh
+
+# Weekly Lynis audit (Sunday 03:30)
+30 3 * * 0 root test -x /opt/scripts/hosting-lynis-audit.sh && /opt/scripts/hosting-lynis-audit.sh
+
+# Weekly debsums integrity check (Sunday 02:30)
+30 2 * * 0 root test -x /opt/scripts/hosting-debsums-check.sh && /opt/scripts/hosting-debsums-check.sh
+

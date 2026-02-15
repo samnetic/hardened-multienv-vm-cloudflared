@@ -22,13 +22,13 @@ nano Caddyfile
 # Replace all instances of "yourdomain.com" with your actual domain
 
 # Start Caddy
-docker compose up -d
+sudo docker compose up -d
 
 # View logs
-docker compose logs -f
+sudo docker compose logs -f
 
 # Test configuration
-docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile
+sudo docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile
 ```
 
 ## Configuration
@@ -63,7 +63,7 @@ http://new-app.yourdomain.com {
 2. Reload Caddy:
 
 ```bash
-docker compose restart caddy
+sudo docker compose restart caddy
 ```
 
 ## Security
@@ -72,50 +72,59 @@ Caddy is hardened with:
 - ✅ `no-new-privileges` - Prevent privilege escalation
 - ✅ `cap_drop: ALL` - Drop all Linux capabilities
 - ✅ `cap_add: NET_BIND_SERVICE` - Only allow binding to port 80
-- ✅ Security headers (HSTS, CSP, X-Frame-Options)
+- ✅ Security headers (HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy)
+- ✅ `tunnel_only` origin enforcement (rejects non-tunnel traffic at Caddy)
 - ✅ Resource limits (0.5 CPU, 256MB RAM)
 
 ## Networks
 
 Caddy connects to:
+- `hosting-caddy-origin` - Origin enforcement network (required)
+- `dev-web` - Dev environment apps
 - `staging-web` - Staging environment apps
 - `prod-web` - Production environment apps
-- `monitoring` (optional) - For Prometheus metrics
+- `monitoring` (optional) - For Prometheus metrics (if enabled)
+
+Before starting, ensure networks exist:
+
+```bash
+sudo /opt/hosting-blueprint/scripts/create-networks.sh
+```
 
 ## Troubleshooting
 
 ### Check if Caddy is running
 
 ```bash
-docker compose ps
-docker compose logs caddy
+sudo docker compose ps
+sudo docker compose logs caddy
 ```
 
 ### Validate Caddyfile syntax
 
 ```bash
-docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile
+sudo docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile
 ```
 
 ### Test app connectivity
 
 ```bash
 # From inside Caddy container
-docker compose exec caddy wget -O- http://app-staging:80
+sudo docker compose exec caddy wget -O- http://app-staging:80
 ```
 
 ### View access logs
 
 ```bash
 # Inside container
-docker compose exec caddy tail -f /data/logs/staging-access.log
-docker compose exec caddy tail -f /data/logs/production-access.log
+sudo docker compose exec caddy tail -f /data/logs/staging-access.log
+sudo docker compose exec caddy tail -f /data/logs/production-access.log
 ```
 
 ### Reload configuration without downtime
 
 ```bash
-docker compose restart caddy
+sudo docker compose restart caddy
 ```
 
 ## Files

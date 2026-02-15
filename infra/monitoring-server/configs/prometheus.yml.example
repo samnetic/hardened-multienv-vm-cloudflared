@@ -1,0 +1,86 @@
+# Prometheus config (monitoring VPS)
+#
+# Goal:
+# - Scrape app VPS targets through Cloudflare Tunnel
+# - Metrics endpoints are protected by Cloudflare Access "Service Auth"
+# - Prometheus sends CF Access headers using a service token stored in files
+#
+# Required secret files in the Prometheus container:
+# - /etc/prometheus/cf_access_client_id
+# - /etc/prometheus/cf_access_client_secret
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # ===============================================================
+  # App VPS Targets (Behind Cloudflare Access Service Auth)
+  # ===============================================================
+  # Recommended hostnames per app VPS:
+  # - metrics.<domain>         -> node-exporter:9100 (host metrics)
+  # - docker-metrics.<domain>  -> dockerd-metrics-proxy:9324 (daemon metrics)
+  # - cadvisor.<domain>        -> cadvisor:8080 (per-container metrics, optional)
+  #
+  # See:
+  # - infra/monitoring-agent/
+  # - docs/17-monitoring-separate-vps.md
+  # - docs/18-monitoring-server.md
+  # ===============================================================
+
+  - job_name: node
+    scheme: https
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - metrics.app1.example.com
+          - metrics.app2.example.com
+    http_headers:
+      CF-Access-Client-Id:
+        files:
+          - /etc/prometheus/cf_access_client_id
+      CF-Access-Client-Secret:
+        files:
+          - /etc/prometheus/cf_access_client_secret
+
+  - job_name: dockerd
+    scheme: https
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - docker-metrics.app1.example.com
+          - docker-metrics.app2.example.com
+    http_headers:
+      CF-Access-Client-Id:
+        files:
+          - /etc/prometheus/cf_access_client_id
+      CF-Access-Client-Secret:
+        files:
+          - /etc/prometheus/cf_access_client_secret
+
+  - job_name: cadvisor
+    scheme: https
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - cadvisor.app1.example.com
+          - cadvisor.app2.example.com
+    http_headers:
+      CF-Access-Client-Id:
+        files:
+          - /etc/prometheus/cf_access_client_id
+      CF-Access-Client-Secret:
+        files:
+          - /etc/prometheus/cf_access_client_secret

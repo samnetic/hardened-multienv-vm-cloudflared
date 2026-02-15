@@ -1,285 +1,135 @@
 # Directory Structure Guide
 
-Proper organization for template setup scripts vs. your running infrastructure.
+Keep the "installer/template" separate from your "running infrastructure" and "running apps". This keeps updates clean and avoids mixing secrets into git.
 
-## Two Separate Directories
+## Recommended Structure
 
-### 1. `/opt/hosting-blueprint` - Template & Setup Scripts
+```
+/opt/hosting-blueprint/        # This repo: installer scripts + templates (pull updates here)
+/srv/infrastructure/           # Your infrastructure code (Caddy/monitoring config you own)
+/srv/apps/                     # Your app deployments (per environment)
+/var/secrets/                  # Host secrets (NOT in git)
+```
 
-**Purpose:** One-time setup, reference, and script updates
+## What Lives Where
 
-**Contents:**
+### 1. `/opt/hosting-blueprint` (Template + Tools)
+
+Purpose:
+- One-time VM hardening and setup
+- Reusable maintenance scripts
+- Reference templates for infra/apps
+
+Typical contents:
 ```
 /opt/hosting-blueprint/
-├── scripts/              # Setup & maintenance scripts
-│   ├── setup-vm.sh      # Initial VM hardening
-│   ├── install-cloudflared.sh
-│   ├── prepare-ssh-keys.sh (run on local machine)
-│   ├── check-dns-exposure.sh
-│   ├── update-caddy.sh   # Safe Caddy reload helper
-│   └── init-gitops.sh    # GitHub CI/CD setup
-├── docs/                 # Documentation
-│   ├── 00-initial-setup.md
-│   ├── caddy-configuration-guide.md
-│   └── ...
-├── infra/                # Template configs (copy from here)
-├── apps/                 # Template apps (copy from here)
-└── README.md
+├── scripts/
+├── docs/
+├── infra/                     # Templates copied into /srv/infrastructure/
+└── apps/                      # Templates copied into /srv/apps/ (optional)
 ```
 
-**Git workflow:**
-- This is the upstream template repository
-- Pull updates: `cd /opt/hosting-blueprint && git pull`
-- Don't modify files here (they'll be overwritten on pull)
-- Use as reference only
+Workflow:
+- Update tooling: `cd /opt/hosting-blueprint && git pull`
+- Do not store secrets here
 
-### 2. `/opt/infrastructure` - Your Running Services
+### 2. `/srv/infrastructure` (Your Running Infra)
 
-**Purpose:** Your actual infrastructure (version controlled, deployed)
+Purpose:
+- Caddy reverse-proxy config and infra compose files you edit and version-control
 
-**Contents:**
+Typical contents:
 ```
-/opt/infrastructure/
-├── infra/
-│   ├── reverse-proxy/
-│   │   ├── Caddyfile          # ← Edit this for yourdomain.com
-│   │   ├── compose.yml
-│   │   ├── logs/
-│   │   └── backups/           # Auto-created by update-caddy.sh
-│   └── monitoring/
-│       └── netdata/
-│           └── compose.yml
-├── apps/
-│   ├── _template/             # Copy this for new apps
-│   ├── myapp-dev/
-│   │   ├── compose.yml
-│   │   ├── .env
-│   │   ├── Dockerfile
-│   │   └── src/
-│   ├── myapp-staging/
-│   └── myapp-production/
-├── secrets/
-│   ├── dev/
-│   ├── staging/
-│   └── production/
-├── .github/
-│   └── workflows/
-│       └── deploy.yml         # CI/CD pipeline
-├── .gitignore
-└── README.md                  # Your infrastructure docs
+/srv/infrastructure/
+├── reverse-proxy/
+│   ├── Caddyfile
+│   └── compose.yml
+├── monitoring/
+│   └── compose.yml
+├── monitoring-agent/          # Optional: node-exporter + dockerd metrics proxy (app VPS)
+│   ├── compose.yml
+│   └── compose.cadvisor.yml   # Optional: per-container metrics (higher privilege)
+├── monitoring-server/         # Optional: Prometheus + Grafana + Alertmanager (separate VPS)
+│   └── compose.yml
+└── cloudflared/               # Optional: tunnel config templates/docs
 ```
 
-**Git workflow:**
-- This is YOUR git repository
-- Track changes: `git add`, `git commit`, `git push`
-- Deploy via GitHub Actions
-- Your team collaborates here
+Workflow:
+- This is yours. Commit/push changes in your infra repo.
 
-## Initial Setup Process
+### 3. `/srv/apps` (Your App Deployments)
 
-### Step 1: Clone Template (One-Time)
+Purpose:
+- Compose stacks for apps, separated by environment tiers
 
+Typical contents:
+```
+/srv/apps/
+├── dev/
+│   └── myapp/
+│       ├── compose.yml
+│       └── .env
+├── staging/
+│   └── myapp/
+└── production/
+    └── myapp/
+```
+
+### 4. `/var/secrets` (Host Secrets)
+
+Purpose:
+- File-based secrets mounted into containers at `/run/secrets/*`
+
+Layout:
+```
+/var/secrets/
+├── dev/
+├── staging/
+└── production/
+```
+
+Permissions (recommended):
+- `/var/secrets` and env dirs: `root:hosting-secrets` `750`
+- secret files: `root:hosting-secrets` `640`
+
+## Initial Setup (Clean UX)
+
+1. Install and harden the VM:
 ```bash
-# Already done via bootstrap.sh
 cd /opt/hosting-blueprint
-git pull  # Get latest scripts and docs
+sudo ./setup.sh
 ```
 
-### Step 2: Create Your Infrastructure Repo
-
+2. Initialize `/srv/infrastructure` from templates:
 ```bash
-# Create your infrastructure directory
-sudo mkdir -p /opt/infrastructure
-sudo chown $USER:$USER /opt/infrastructure
-
-# Copy template structure
-cp -r /opt/hosting-blueprint/infra /opt/infrastructure/
-cp -r /opt/hosting-blueprint/apps /opt/infrastructure/
-cp /opt/hosting-blueprint/.gitignore /opt/infrastructure/
-
-# Initialize git
-cd /opt/infrastructure
-git init
-git add .
-git commit -m "Initial infrastructure setup"
-
-# Create GitHub repo and push
-gh repo create myproject-infrastructure --private
-git remote add origin https://github.com/YOUR_USERNAME/myproject-infrastructure.git
-git push -u origin main
+sudo ./scripts/setup-infrastructure-repo.sh yourdomain.com
 ```
 
-### Step 3: Configure for Your Domain
-
+3. Create Docker networks:
 ```bash
-cd /opt/infrastructure/infra/reverse-proxy
-
-# Update domain
-sed -i 's/yourdomain.com/example.com/g' Caddyfile  # Replace with YOUR domain
-
-# Commit changes
-git add Caddyfile
-git commit -m "Configure domain"
-git push
+sudo ./scripts/create-networks.sh
 ```
 
-### Step 4: Start Services
-
+4. Start the reverse proxy:
 ```bash
-cd /opt/infrastructure/infra/reverse-proxy
-docker compose up -d
-
-# Verify
-docker compose ps
-docker compose logs -f
+cd /srv/infrastructure/reverse-proxy
+sudo docker compose up -d
 ```
 
-## Using Setup Scripts from Template
-
-Setup scripts in `/opt/hosting-blueprint/scripts/` can be run from anywhere.
-
-### Update Caddy Configuration Safely
-
+5. Create secrets (stored in `/var/secrets`):
 ```bash
-# Edit your infrastructure Caddyfile
-vim /opt/infrastructure/infra/reverse-proxy/Caddyfile
-
-# Use template script to validate and reload
-sudo /opt/hosting-blueprint/scripts/update-caddy.sh \
-  /opt/infrastructure/infra/reverse-proxy
-
-# Or create a wrapper script
+./scripts/secrets/create-secret.sh staging db_password
+./scripts/secrets/create-secret.sh production api_key
 ```
 
-**Better: Create a helper script in your infrastructure repo:**
+## Common Maintenance
 
+Update Caddy safely:
 ```bash
-# /opt/infrastructure/scripts/update-caddy.sh
-#!/bin/bash
-exec /opt/hosting-blueprint/scripts/update-caddy.sh \
-  /opt/infrastructure/infra/reverse-proxy
+sudo /opt/hosting-blueprint/scripts/update-caddy.sh /srv/infrastructure/reverse-proxy
 ```
 
-### Check DNS Exposure
-
+Check DNS exposure (ensure no A/AAAA records point to your VM):
 ```bash
-# Run from anywhere
 sudo /opt/hosting-blueprint/scripts/check-dns-exposure.sh yourdomain.com
 ```
-
-### Prepare SSH Keys (Local Machine)
-
-```bash
-# On your local machine
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm/main/scripts/prepare-ssh-keys.sh | bash
-```
-
-## Updating Template Scripts
-
-When new scripts are added to the template:
-
-```bash
-# Pull latest template updates
-cd /opt/hosting-blueprint
-git pull origin master
-
-# New scripts are now available
-ls scripts/
-
-# Use them with your infrastructure
-sudo /opt/hosting-blueprint/scripts/new-script.sh
-```
-
-## GitOps Workflow
-
-Your infrastructure repo (`/opt/infrastructure`) should be connected to GitHub Actions:
-
-```mermaid
-graph LR
-    A[Local Dev] -->|git push| B[GitHub]
-    B -->|GitHub Actions| C[Deploy to VM]
-    C -->|Update| D[/opt/infrastructure]
-```
-
-### Branches:
-- `dev` → deploys to dev-app.yourdomain.com
-- `staging` → deploys to staging-app.yourdomain.com
-- `main` → deploys to app.yourdomain.com
-
-## Configuration Management
-
-### Environment-Specific Configs
-
-```
-/opt/infrastructure/apps/myapp/
-├── compose.dev.yml        # Dev overrides
-├── compose.staging.yml    # Staging overrides
-├── compose.production.yml # Production overrides
-├── .env.dev
-├── .env.staging
-└── .env.production
-```
-
-### Secrets (Not in Git)
-
-```bash
-# Create secrets (not tracked in git)
-/opt/hosting-blueprint/scripts/secrets/create-secret.sh dev db_password
-
-# Stored in /opt/infrastructure/secrets/dev/db_password
-# Referenced in compose.yml as:
-# secrets:
-#   db_password:
-#     file: ../../secrets/dev/db_password
-```
-
-## Why Separate Directories?
-
-| Directory | Purpose | Git | Updates |
-|-----------|---------|-----|---------|
-| `/opt/hosting-blueprint` | Setup scripts & docs | Template repo | `git pull` for new scripts |
-| `/opt/infrastructure` | Running services | Your repo | `git push` your changes |
-
-**Benefits:**
-- ✅ Clear separation of concerns
-- ✅ Template updates don't break your config
-- ✅ Your infrastructure is version controlled
-- ✅ Team can collaborate on your infrastructure repo
-- ✅ CI/CD deploys to `/opt/infrastructure`
-- ✅ Scripts remain available for maintenance tasks
-
-## Migration for Existing Users
-
-If you've been using `/opt/hosting-blueprint` for services:
-
-```bash
-# 1. Create infrastructure directory
-sudo mkdir -p /opt/infrastructure
-sudo chown $USER:$USER /opt/infrastructure
-
-# 2. Move running services
-sudo mv /opt/hosting-blueprint/infra /opt/infrastructure/
-sudo mv /opt/hosting-blueprint/apps /opt/infrastructure/
-
-# 3. Update docker compose paths (if needed)
-cd /opt/infrastructure/infra/reverse-proxy
-# Check compose.yml for any absolute paths
-
-# 4. Initialize git repo
-cd /opt/infrastructure
-git init
-git add .
-git commit -m "Migrate infrastructure from hosting-blueprint"
-
-# 5. Continue using hosting-blueprint for scripts
-cd /opt/hosting-blueprint
-git pull  # Won't affect your running services anymore
-```
-
-## Summary
-
-- **Template** (`/opt/hosting-blueprint`): Setup scripts, docs, reference
-- **Infrastructure** (`/opt/infrastructure`): Your actual running services
-- **Scripts**: Run from template, act on infrastructure
-- **Git**: Template is upstream, infrastructure is yours
-- **Updates**: Pull template for new scripts, push infrastructure for deployments

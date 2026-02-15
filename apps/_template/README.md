@@ -31,27 +31,29 @@ nano .env
 ### 3. Update compose.yml
 
 Edit `compose.yml` and update:
-- `image:` - Your Docker image name
-- OR `build:` - If building from Dockerfile
+- `image:` - Your Docker image name (pin a version tag or digest; avoid `:latest`)
+- `build:` - Discouraged in production; the hardened GitOps deploy policy blocks `build:` by default
 - `healthcheck:` - Your app's health endpoint
 - `environment:` - App-specific variables
 
 ### 4. Deploy
 
 ```bash
-# Pull/build image
-docker compose pull
-# OR
-docker compose build
+# Pull image (recommended; GitOps expects pre-built images)
+sudo docker compose pull
+#
+# If you really need on-VM builds (not recommended):
+# - Set ALLOW_BUILD=1 in /etc/hosting-blueprint/deploy-policy.env (root-owned)
+# - Then: sudo docker compose build
 
 # Start app
-docker compose up -d
+sudo docker compose up -d
 
 # View logs
-docker compose logs -f
+sudo docker compose logs -f
 
 # Check status
-docker compose ps
+sudo docker compose ps
 ```
 
 ### 5. Add to Caddy
@@ -71,7 +73,7 @@ Restart Caddy:
 
 ```bash
 cd infra/reverse-proxy
-docker compose restart caddy
+sudo docker compose restart caddy
 ```
 
 ---
@@ -216,23 +218,23 @@ Your app will be accessible at: `https://app.yourdomain.com`
 
 ```bash
 # Check logs
-docker compose logs -f
+sudo docker compose logs -f
 
 # Check container status
-docker compose ps
+sudo docker compose ps
 
 # Inspect container
-docker inspect app-${ENVIRONMENT}
+sudo docker inspect app-${ENVIRONMENT}
 ```
 
 ### Health check failing
 
 ```bash
 # Test health endpoint manually
-docker compose exec app wget -O- http://localhost:3000/health
+sudo docker compose exec app wget -O- http://localhost:3000/health
 
 # View health status
-docker inspect app-${ENVIRONMENT} | grep -A 10 Health
+sudo docker inspect app-${ENVIRONMENT} | grep -A 10 Health
 ```
 
 ### Permission errors
@@ -241,7 +243,7 @@ Check if your app needs additional capabilities:
 
 ```bash
 # View app logs for permission errors
-docker compose logs app | grep -i permission
+sudo docker compose logs app | grep -i permission
 ```
 
 ---
@@ -252,7 +254,7 @@ docker compose logs app | grep -i permission
 2. **Use health checks** - Automatic recovery from failures
 3. **Run as non-root** - Add `user: "1000:1000"` if possible
 4. **Minimize capabilities** - Only add what's absolutely needed
-5. **Use .env for secrets** - Never commit secrets to git
+5. **Use file-based secrets** - Put secrets in `/var/secrets/<env>/*.txt` and mount them read-only
 6. **Test in staging first** - Always deploy to staging before production
 
 ---

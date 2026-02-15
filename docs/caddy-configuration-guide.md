@@ -22,11 +22,17 @@ sudo /opt/hosting-blueprint/scripts/update-caddy.sh
 
 # Or manually:
 # Validate syntax
-docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:latest caddy validate --config /etc/caddy/Caddyfile
+sudo docker run --rm --network none -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
 
 # If valid, reload (zero downtime)
-docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+sudo docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
 ```
+
+## Critical Security Notes
+
+- Keep `import tunnel_only` in every site block. It prevents origin IP bypass and container-to-container bypass.
+- `hosting-caddy-origin` must exist (created by `sudo ./scripts/create-networks.sh`) and must remain the **first** network attached to the Caddy container (see `infra/reverse-proxy/compose.yml`), otherwise `tunnel_only` allowlists can break.
+- Don’t publish app container ports to the host. Route through Caddy on Docker networks.
 
 ## Safe Editing Workflow
 
@@ -56,15 +62,15 @@ cd /opt/hosting-blueprint/infra/reverse-proxy
 nano Caddyfile
 
 # Validate syntax
-docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
-  caddy:latest caddy validate --config /etc/caddy/Caddyfile
+sudo docker run --rm --network none -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
+  caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
 
 # If valid, reload gracefully
-docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+sudo docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
 
 # Check status
-docker compose ps
-docker compose logs caddy --tail 20
+sudo docker compose ps
+sudo docker compose logs caddy --tail 20
 ```
 
 ## Common Caddy Configurations
@@ -161,8 +167,8 @@ http://*.yourdomain.com → 404 for unconfigured subdomains
 
 ```bash
 # Always validate before applying!
-docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
-  caddy:latest caddy validate --config /etc/caddy/Caddyfile
+sudo docker run --rm --network none -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
+  caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
 ```
 
 ### 2. Test with curl (from VM or local)
@@ -181,13 +187,13 @@ curl https://dev-app.yourdomain.com
 cd /opt/hosting-blueprint/infra/reverse-proxy
 
 # Real-time logs
-docker compose logs caddy -f
+sudo docker compose logs caddy -f
 
 # Last 50 lines
-docker compose logs caddy --tail 50
+sudo docker compose logs caddy --tail 50
 
 # Check for errors
-docker compose logs caddy | grep -i error
+sudo docker compose logs caddy | grep -i error
 ```
 
 ## Common Errors and Fixes
@@ -215,8 +221,8 @@ sudo lsof -i :443
 **Check:**
 1. DNS CNAME points to tunnel: `dig dev-app.yourdomain.com`
 2. Cloudflare proxy enabled (orange cloud)
-3. Docker container running: `docker ps | grep app-dev`
-4. Container on correct network: `docker inspect app-dev | grep Network`
+3. Docker container running: `sudo docker ps | grep app-dev`
+4. Container on correct network: `sudo docker inspect app-dev | grep Network`
 5. Caddy logs for errors
 
 ## Rollback to Previous Config
@@ -232,7 +238,7 @@ ls -lt
 cp Caddyfile.YYYYMMDD_HHMMSS ../Caddyfile
 
 # Reload
-docker compose restart caddy
+sudo docker compose restart caddy
 ```
 
 ## Best Practices
@@ -280,26 +286,26 @@ Caddy supports graceful reloads:
 
 ```bash
 # This does NOT drop connections
-docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+sudo docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
 
 # vs. restart (WILL drop connections)
-docker compose restart caddy  # Only use if reload fails
+sudo docker compose restart caddy  # Only use if reload fails
 ```
 
 ## Monitoring Caddy
 
 ```bash
 # Is Caddy running?
-docker compose ps caddy
+sudo docker compose ps caddy
 
 # Resource usage
-docker stats caddy --no-stream
+sudo docker stats caddy --no-stream
 
 # Access logs (JSON format)
-docker compose exec caddy cat /data/logs/production-access.log | tail -20
+sudo docker compose exec caddy cat /data/logs/production-access.log | tail -20
 
 # Error logs
-docker compose logs caddy | grep ERROR
+sudo docker compose logs caddy | grep ERROR
 ```
 
 ## Next Steps

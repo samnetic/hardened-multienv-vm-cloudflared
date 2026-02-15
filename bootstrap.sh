@@ -5,7 +5,7 @@
 # One-liner installation script for fresh Ubuntu VMs
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm/main/bootstrap.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/bootstrap.sh | sudo bash
 #
 # What this does:
 #   1. Checks prerequisites (OS, root, resources, network)
@@ -34,7 +34,7 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 # Repository configuration
-REPO_URL="https://github.com/samnetic/hardened-multienv-vm.git"
+REPO_URL="https://github.com/samnetic/hardened-multienv-vm-cloudflared.git"
 REPO_DIR="/opt/hosting-blueprint"
 
 # =================================================================
@@ -78,6 +78,46 @@ hide_progress() {
   echo -e "\r\033[K"
 }
 
+wait_for_apt() {
+  local timeout="${APT_LOCK_TIMEOUT:-300}"
+  local start now elapsed
+  start="$(date +%s)"
+
+  while true; do
+    local locked=false
+    if command -v fuser >/dev/null 2>&1; then
+      if fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
+         fuser /var/lib/dpkg/lock >/dev/null 2>&1 || \
+         fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
+         fuser /var/cache/apt/archives/lock >/dev/null 2>&1; then
+        locked=true
+      fi
+    else
+      if pgrep -x apt-get >/dev/null 2>&1 || \
+         pgrep -x apt >/dev/null 2>&1 || \
+         pgrep -x dpkg >/dev/null 2>&1 || \
+         pgrep -f unattended-upgrade >/dev/null 2>&1; then
+        locked=true
+      fi
+    fi
+
+    if [ "$locked" = false ]; then
+      return 0
+    fi
+
+    now="$(date +%s)"
+    elapsed=$((now - start))
+    if [ "$elapsed" -ge "$timeout" ]; then
+      print_error "Timed out waiting for apt/dpkg locks after ${timeout}s."
+      print_info "Try: sudo systemctl stop apt-daily.service apt-daily-upgrade.service"
+      exit 1
+    fi
+
+    print_info "Waiting for apt/dpkg locks... (${elapsed}s)"
+    sleep 5
+  done
+}
+
 # =================================================================
 # Prerequisite Checks
 # =================================================================
@@ -87,7 +127,7 @@ check_root() {
     print_error "This script must be run as root"
     echo ""
     echo "Please run:"
-    echo "  curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm/main/bootstrap.sh | sudo bash"
+    echo "  curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/bootstrap.sh | sudo bash"
     echo ""
     exit 1
   fi
@@ -208,10 +248,12 @@ install_git() {
   print_step "Installing git..."
 
   show_progress "Updating package list"
+  wait_for_apt
   apt-get update -qq > /dev/null 2>&1
   hide_progress
 
   show_progress "Installing git"
+  wait_for_apt
   apt-get install -y git -qq > /dev/null 2>&1
   hide_progress
 
@@ -278,8 +320,7 @@ set_permissions() {
 
   # Make scripts executable
   chmod +x "$REPO_DIR/setup.sh" 2>/dev/null || true
-  chmod +x "$REPO_DIR"/scripts/*.sh 2>/dev/null || true
-  chmod +x "$REPO_DIR"/scripts/**/*.sh 2>/dev/null || true
+  find "$REPO_DIR/scripts" -type f -name '*.sh' -exec chmod +x {} \; 2>/dev/null || true
 
   # Detect original user (who ran sudo)
   local original_user="${SUDO_USER:-}"

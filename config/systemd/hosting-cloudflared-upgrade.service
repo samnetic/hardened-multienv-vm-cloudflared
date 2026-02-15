@@ -1,0 +1,9 @@
+[Unit]
+Description=hosting-blueprint: Upgrade cloudflared package
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hosting-cloudflared-upgrade
+

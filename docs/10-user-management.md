@@ -8,8 +8,8 @@ This template uses a **dual-user model** with clear separation of duties:
 
 | User | Purpose | Sudo | Docker | SSH |
 |------|---------|------|--------|-----|
-| `sysadmin` | System administration | Yes | Yes | Yes |
-| `appmgr` | Application deployment | No | Yes | Yes |
+| `sysadmin` | System administration (human) | Yes | **No (default)** | Yes |
+| `appmgr` | CI/CD deployments (restricted) | **Limited (hosting-only)** | No | Yes (ForceCommand) |
 | `root` | Emergency only | N/A | Yes | **No** |
 
 ### Why Two Users?
@@ -17,9 +17,19 @@ This template uses a **dual-user model** with clear separation of duties:
 **Principle of Least Privilege**: Give each user only the permissions they need.
 
 - **sysadmin** - For humans who need to configure the system, install packages, change firewall rules
-- **appmgr** - For deployments (CI/CD), starting/stopping containers, viewing logs
+- **appmgr** - For CI/CD deployments only (no shell). Can run `hosting ...` commands only.
 
-If your CI/CD is compromised, the attacker can only affect Docker containers, not the entire system.
+Important: on a Docker host, membership in the `docker` group is **root-equivalent**.
+
+This blueprint avoids giving `appmgr` docker access. Instead:
+- `appmgr` is restricted via `ForceCommand` to a very small interface.
+- Root runs deployments through a guardrailed deploy tool with policy checks.
+
+Mitigations:
+- Protect SSH with Cloudflare Access (SSO for humans, Service Tokens for CI).
+- Use GitHub Environments for `production` with required reviewers.
+- Treat the deploy key like a root key (rotate quickly if exposed).
+- Use a restricted deploy key (forced command) so CI cannot run arbitrary shell (enabled by default here).
 
 ## User Setup
 
@@ -31,12 +41,11 @@ The `setup-vm.sh` script creates both users:
 # sysadmin - full system access
 adduser --disabled-password --gecos "" sysadmin
 usermod -aG sudo sysadmin
-usermod -aG docker sysadmin
 
-# appmgr - deployment only
+# appmgr - CI/CD only (restricted)
 adduser --disabled-password --gecos "" appmgr
-usermod -aG docker appmgr
-# Note: NO sudo for appmgr
+# Note: appmgr cannot get a shell; it is restricted via sshd ForceCommand.
+# Note: appmgr gets a small sudo allowlist for /usr/local/sbin/hosting-deploy only.
 ```
 
 ### Adding SSH Keys
@@ -51,7 +60,8 @@ sudo chmod 600 /home/sysadmin/.ssh/authorized_keys
 
 # For appmgr (CI/CD deploy key)
 sudo mkdir -p /home/appmgr/.ssh
-echo "ssh-ed25519 AAAA... github-actions" | sudo tee /home/appmgr/.ssh/authorized_keys
+# Recommended: restrict the key to reduce SSH feature abuse (no pty/forwarding/user-rc/etc.).
+echo "restrict ssh-ed25519 AAAA... github-actions" | sudo tee /home/appmgr/.ssh/authorized_keys
 sudo chown -R appmgr:appmgr /home/appmgr/.ssh
 sudo chmod 700 /home/appmgr/.ssh
 sudo chmod 600 /home/appmgr/.ssh/authorized_keys
@@ -69,7 +79,6 @@ sudo adduser --disabled-password --gecos "Jane Doe" jane
 
 # Add to groups
 sudo usermod -aG sudo jane
-sudo usermod -aG docker jane
 
 # Add their SSH key
 sudo mkdir -p /home/jane/.ssh
@@ -81,22 +90,15 @@ sudo chmod 600 /home/jane/.ssh/authorized_keys
 
 ### New Developer (Deploy Only)
 
-For someone who only needs to deploy:
+For someone who only needs to deploy, prefer GitHub Actions + Cloudflare Access.
 
-```bash
-# Create user
-sudo adduser --disabled-password --gecos "John Smith" john
+Avoid giving humans docker-group access.
 
-# Add to docker group ONLY (no sudo)
-sudo usermod -aG docker john
+If you need an additional restricted deploy user, replicate the `appmgr` model
+(ForceCommand + sudo allowlist to `hosting-deploy`), instead of adding users
+to the docker group.
 
-# Add their SSH key
-sudo mkdir -p /home/john/.ssh
-echo "ssh-ed25519 AAAA... john@company.com" | sudo tee /home/john/.ssh/authorized_keys
-sudo chown -R john:john /home/john/.ssh
-sudo chmod 700 /home/john/.ssh
-sudo chmod 600 /home/john/.ssh/authorized_keys
-```
+See: `config/ssh/sshd_config.d/99-appmgr-ci.conf` and `config/sudoers.d/appmgr-hosting-deploy`.
 
 ### Read-Only Access (Logs/Monitoring)
 
@@ -113,7 +115,7 @@ sudo chown -R support:support /home/support/.ssh
 sudo chmod 700 /home/support/.ssh
 sudo chmod 600 /home/support/.ssh/authorized_keys
 
-# They can run monitoring scripts but can't docker exec or sudo
+# They can run monitoring scripts but can't sudo docker exec or sudo
 ```
 
 ## Removing Users
@@ -290,15 +292,17 @@ sudo ausearch -k sudo_log
 ### Add Admin User
 ```bash
 sudo adduser --disabled-password username
-sudo usermod -aG sudo,docker username
+sudo usermod -aG sudo username
 # Add SSH key
 ```
 
 ### Add Deploy User
 ```bash
 sudo adduser --disabled-password username
-sudo usermod -aG docker username
-# Add SSH key
+# Do NOT add to docker group (docker group is root-equivalent).
+# Prefer GitHub Actions + Cloudflare Access, or replicate the restricted `appmgr` model:
+# - sshd ForceCommand wrapper
+# - sudo allowlist to /usr/local/sbin/hosting-deploy only
 ```
 
 ### Remove User

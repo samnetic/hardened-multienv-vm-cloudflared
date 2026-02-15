@@ -1,313 +1,89 @@
-# Quick Start: Repository Setup
+# Quick Start: Repository Layout (Recommended)
 
-## TL;DR - Recommended Approach
+This blueprint works best when you separate:
 
-**Use a hybrid approach:**
-1. **Infrastructure Monorepo** (GitHub template) - for server config + third-party apps
-2. **Separate Custom App Repos** - for your APIs, NextJS apps, etc.
-3. **Initialization Script** - automates the setup
+- **Template repo** (this repo) from
+- **Infrastructure repo** (reverse proxy, monitoring) and
+- **Deployments repo** (your app compose files per environment)
 
-## Why This Approach?
+This keeps UX clean and avoids accidentally committing secrets.
 
-✅ **Cleanest structure** - Clear separation between infrastructure and applications
-✅ **Best UX** - One command to initialize, GitOps for updates
-✅ **Easiest to maintain** - Infrastructure changes don't affect app deployments
-✅ **Scalable** - Add new apps without touching core infrastructure
+## Server Layout
 
-## Setup in 3 Steps
+```
+/opt/hosting-blueprint/            # This template repo (bootstrap installs here)
+/srv/infrastructure/               # Your infra repo (git tracked)
+/srv/apps/
+  dev/                             # Your DEV deployments repo checkout
+  staging/                         # Your STAGING deployments repo checkout
+  production/                      # Your PRODUCTION deployments repo checkout
+/var/secrets/{dev,staging,production}/   # Secrets (never in git)
+```
 
-### Step 1: Create Infrastructure Template on GitHub
+## Step 1: Initialize `/srv/infrastructure`
 
-1. Create new repository: `infrastructure-template`
-2. Copy structure from `docs/infrastructure-template-structure.md`
-3. Mark as template repository (Settings → Template repository)
-
-### Step 2: Use Template on Server
+On the VM:
 
 ```bash
-# SSH to server
-ssh myserver
-sudo su - appmgr
-
-# Clone your infrastructure repo
-git clone https://github.com/YOUR_ORG/infrastructure.git /opt/infrastructure
-cd /opt/infrastructure
-
-# Run initialization
-./.deploy/init-infrastructure.sh
+sudo /opt/hosting-blueprint/scripts/setup-infrastructure-repo.sh yourdomain.com
 ```
 
-This script:
-- Creates Docker networks (dev, staging, prod)
-- Creates `/srv/apps/` directories
-- Starts Caddy reverse proxy
-- Sets proper permissions
+This:
 
-### Step 3: Deploy Apps
+- Creates `/srv/infrastructure`
+- Copies templates (`reverse-proxy/`, `monitoring/`, `cloudflared/`)
+- Configures the domain in `reverse-proxy/Caddyfile`
+- Starts Caddy (localhost-bound)
 
-**Third-party apps (n8n, Grafana, etc.):**
-```bash
-cd /opt/infrastructure/apps/n8n
-cp .env.example .env
-nano .env  # Set DOMAIN
-docker compose up -d
-```
+## Step 2: Create a Deployments Repo
 
-**Custom apps (your APIs, NextJS, etc.):**
-```bash
-cd /opt/infrastructure
-./scripts/setup-custom-app.sh \
-  --repo https://github.com/YOUR_ORG/my-api \
-  --env production \
-  --subdomain api
-```
-
-## Repository Structure
+Create a private Git repo (example: `mycompany-vps-deployments`) with structure like:
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ /opt/infrastructure/ (Monorepo - GitHub Template)      │
-│                                                          │
-│ ├── infra/                                              │
-│ │   ├── reverse-proxy/   ← Caddyfile (all routing)    │
-│ │   └── monitoring/      ← Grafana, Prometheus         │
-│ │                                                          │
-│ ├── apps/                                               │
-│ │   ├── n8n/             ← Third-party apps            │
-│ │   ├── portainer/                                      │
-│ │   └── grafana/                                        │
-│ │                                                          │
-│ └── .deploy/                                            │
-│     ├── init-infrastructure.sh                         │
-│     └── setup-custom-app.sh                            │
-└─────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────┐
-│ /srv/apps/{env}/ (Custom Apps - Separate Repos)        │
-│                                                          │
-│ ├── my-api/          ← Deployed from GitHub            │
-│ ├── my-nextjs-app/   ← Deployed via CI/CD              │
-│ └── my-dashboard/    ← Each has own repo                │
-└─────────────────────────────────────────────────────────┘
+api/
+  compose.yml
+n8n/
+  compose.yml
 ```
 
-## Routing (Caddyfile)
+Copy `.github/workflows/deploy.yml` into that repo. Then GitHub Actions deploys it to the VM at:
 
-All routing lives in ONE place:
+- `/srv/apps/dev`
+- `/srv/apps/staging`
+- `/srv/apps/production`
 
-```caddyfile
-# /opt/infrastructure/infra/reverse-proxy/Caddyfile
+The workflow syncs the deployments repo to the VM (via SSH through Cloudflare Access) and triggers `hosting sync` + `hosting deploy` (compose deploy with policy checks).
 
-# Third-party apps
-http://n8n.{$DOMAIN} {
-    reverse_proxy n8n-prod:5678
-}
+## Step 3: Pin SSH Host Keys for CI (Required)
 
-# Custom apps
-http://api.{$DOMAIN} {
-    reverse_proxy my-api-prod:3000
-}
-
-http://app.{$DOMAIN} {
-    reverse_proxy my-nextjs-app-prod:3000
-}
-```
-
-After editing:
-```bash
-cd /opt/infrastructure/infra/reverse-proxy
-docker compose restart
-```
-
-## Integration: Custom App → Infrastructure
-
-Your custom app `docker-compose.yml` connects to infrastructure networks:
-
-```yaml
-# /srv/apps/production/my-api/docker-compose.yml
-version: '3.8'
-
-services:
-  api:
-    container_name: my-api-prod
-    build: .
-    networks:
-      - prod-web  # Created by infrastructure
-    restart: unless-stopped
-
-networks:
-  prod-web:
-    external: true  # Managed by /opt/infrastructure
-```
-
-## Deployment Workflows
-
-### Manual Deployment (Simple)
+On the VM, generate `known_hosts` entries:
 
 ```bash
-# Third-party app
-cd /opt/infrastructure/apps/n8n
-docker compose up -d
-
-# Custom app
-cd /srv/apps/production/my-api
-git pull
-docker compose up -d --build
+./scripts/ssh/print-known-hosts.sh ssh.yourdomain.com
 ```
 
-### Automated GitOps (Recommended)
+Add the output to your GitHub Actions secret `SSH_KNOWN_HOSTS`.
 
-**For infrastructure changes:**
-```bash
-# Edit Caddyfile locally
-git commit -m "Add route for new API"
-git push
+## Step 4: Keep Secrets Out of Git
 
-# On server
-ssh myserver
-sudo su - appmgr
-cd /opt/infrastructure
-git pull
-cd infra/reverse-proxy && docker compose restart
-```
-
-**For custom app deployments:**
-
-Add to your custom app repo `.github/workflows/deploy.yml`:
-```yaml
-name: Deploy to Production
-
-on:
-  push:
-    branches: [main]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Deploy via SSH
-        env:
-          SSH_KEY: ${{ secrets.APPMGR_SSH_KEY }}
-        run: |
-          # Install cloudflared
-          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
-          chmod +x cloudflared
-
-          # Setup SSH
-          mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-
-          # Deploy
-          ssh -o ProxyCommand="./cloudflared access ssh --hostname ssh.yourdomain.com" \
-              -o StrictHostKeyChecking=no \
-              appmgr@ssh.yourdomain.com \
-              "cd /srv/apps/production/my-app && git pull && docker compose up -d --build"
-```
-
-Push to `main` → auto-deploys!
-
-## Comparison: Why Not Other Approaches?
-
-### ❌ Shell Script Only
-```bash
-# Bad: Not version controlled, hard to update
-./create-structure.sh
-```
-
-**Problems:**
-- Changes aren't tracked
-- Can't review history
-- Hard to collaborate
-
-### ❌ Monorepo for Everything
-```bash
-infrastructure/
-├── apps/n8n/
-├── apps/my-api/         # Bad: App code mixed with infra
-├── apps/my-nextjs-app/  # Bad: Violates separation of concerns
-```
-
-**Problems:**
-- Huge repo with mixed concerns
-- App changes trigger infra CI/CD
-- Can't have separate teams/permissions
-- Hard to version apps independently
-
-### ✅ Hybrid Approach (Recommended)
-```bash
-infrastructure/           # Template, one repo
-├── infra/               # Server config
-└── apps/n8n/            # Third-party config
-
-my-api/                  # Separate repo per custom app
-my-nextjs-app/           # Independent versioning
-```
-
-**Benefits:**
-- Clear boundaries
-- Independent versioning
-- Proper separation of concerns
-- Easy to understand
-
-## SSL Certificates (Zero Manual Work)
-
-✅ Cloudflare provisions FREE wildcard SSL automatically
-✅ Covers `*.yourdomain.com` - ALL subdomains
-✅ Automatic renewal - NEVER expires
-✅ No cert files to manage
-
-Just add subdomain to Caddyfile → works with HTTPS!
-
-## Permissions
-
-Everything owned by `appmgr`:
+Use file-based secrets under `/var/secrets`:
 
 ```bash
-/opt/infrastructure/          # appmgr:appmgr 755
-/srv/apps/production/my-api/  # appmgr:appmgr 755
+./scripts/secrets/create-secret.sh production db_password
 ```
 
-Cloudflared config stays with sysadmin:
-```bash
-/etc/cloudflared/             # root:root 755
-```
+In your app `compose.yml`, mount secrets to `/run/secrets/*` and point your app to `*_FILE` env vars.
 
-## Next Steps
+## Optional: Encrypted `.env` in Git (SOPS/age)
 
-1. **Read detailed docs:**
-   - `docs/infrastructure-template-structure.md` - Full template structure
-   - `docs/repository-structure.md` - Architecture explanation
+If you prefer committing encrypted env files (industry standard), keep:
 
-2. **Create your infrastructure template on GitHub**
+- plaintext `.env` files **gitignored**
+- encrypted `.env.*.enc` files **tracked**
 
-3. **Initialize on server:**
-   ```bash
-   git clone YOUR_TEMPLATE /opt/infrastructure
-   cd /opt/infrastructure
-   ./.deploy/init-infrastructure.sh
-   ```
+This repo’s `.gitignore` allows `!.env.*.enc` so you can adopt that pattern later.
 
-4. **Deploy your first app:**
-   ```bash
-   ./scripts/setup-custom-app.sh --repo YOUR_REPO --env production --subdomain api
-   ```
-
-## Questions?
-
-- Infrastructure setup issues? Check `docs/troubleshooting.md`
-- App deployment issues? Check app logs: `docker compose logs -f`
-- SSL not working? Verify Cloudflare DNS is proxied (orange cloud)
-- Routing issues? Check Caddyfile syntax and restart Caddy
-
----
-
-**You now have:**
-✅ Infrastructure as code (version controlled)
-✅ Automated setup (one command)
-✅ Clean separation (infra vs apps)
-✅ Easy deployment (GitOps ready)
-✅ Scalable architecture (add apps easily)
-✅ Secure by default (zero open ports, proper permissions)
+If you use SOPS on the VM:
+- Install `sops` on the VM.
+- Store your age key at `/etc/sops/age/keys.txt` (or set `SOPS_AGE_KEY_FILE`).
+- The deploy workflow can decrypt `.env.<env>.enc` into `.env.<env>` when needed.

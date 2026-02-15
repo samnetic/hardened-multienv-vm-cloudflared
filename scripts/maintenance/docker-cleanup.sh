@@ -55,47 +55,62 @@ fi
 
 log "=== Docker Cleanup Started ==="
 
-# Check if Docker is running
-if ! command -v docker &> /dev/null || ! docker info &> /dev/null; then
-  log "ERROR: Docker not running or not installed"
+# Prefer a security-first model: humans are not in the docker group.
+# If docker isn't directly accessible, fall back to sudo.
+if ! command -v docker &> /dev/null; then
+  log "ERROR: Docker not installed"
+  exit 1
+fi
+
+DOCKER=(docker)
+if ! docker info &>/dev/null; then
+  if [ "$INTERACTIVE" = true ]; then
+    DOCKER=(sudo docker)
+  else
+    DOCKER=(sudo -n docker)
+  fi
+fi
+
+if ! "${DOCKER[@]}" info &>/dev/null; then
+  log "ERROR: Docker not accessible as this user (run with sudo)"
   exit 1
 fi
 
 # Show current usage
 log "Current Docker disk usage:"
-docker system df 2>&1 | while IFS= read -r line; do log "  $line"; done
+"${DOCKER[@]}" system df 2>&1 | while IFS= read -r line; do log "  $line"; done
 
 # Cleanup stopped containers
-STOPPED=$(docker ps -a -f "status=exited" -q 2>/dev/null | wc -l)
+STOPPED=$("${DOCKER[@]}" ps -a -f "status=exited" -q 2>/dev/null | wc -l)
 if [ "$STOPPED" -gt 0 ]; then
   if [ "$DRY_RUN" = true ]; then
     log "[DRY-RUN] Would remove $STOPPED stopped containers:"
-    docker ps -a -f "status=exited" --format "  - {{.Names}} ({{.Image}}, exited {{.Status}})" 2>/dev/null | head -10
+    "${DOCKER[@]}" ps -a -f "status=exited" --format "  - {{.Names}} ({{.Image}}, exited {{.Status}})" 2>/dev/null | head -10
     [ "$STOPPED" -gt 10 ] && echo "  ... and $((STOPPED - 10)) more"
   else
     log "Removing $STOPPED stopped containers..."
-    docker container prune -f >> "$LOG_FILE" 2>&1
+    "${DOCKER[@]}" container prune -f >> "$LOG_FILE" 2>&1
   fi
 fi
 
 # Cleanup dangling images
-DANGLING=$(docker images -f "dangling=true" -q 2>/dev/null | wc -l)
+DANGLING=$("${DOCKER[@]}" images -f "dangling=true" -q 2>/dev/null | wc -l)
 if [ "$DANGLING" -gt 0 ]; then
   if [ "$DRY_RUN" = true ]; then
     log "[DRY-RUN] Would remove $DANGLING dangling images"
   else
     log "Removing $DANGLING dangling images..."
-    docker image prune -f >> "$LOG_FILE" 2>&1
+    "${DOCKER[@]}" image prune -f >> "$LOG_FILE" 2>&1
   fi
 fi
 
 # Cleanup unused networks
-UNUSED_NETS=$(docker network ls --filter "dangling=true" -q 2>/dev/null | wc -l)
+UNUSED_NETS=$("${DOCKER[@]}" network ls --filter "dangling=true" -q 2>/dev/null | wc -l)
 if [ "$DRY_RUN" = true ]; then
   log "[DRY-RUN] Would clean up unused networks (approx $UNUSED_NETS)"
 else
   log "Cleaning up unused networks..."
-  docker network prune -f >> "$LOG_FILE" 2>&1
+  "${DOCKER[@]}" network prune -f >> "$LOG_FILE" 2>&1
 fi
 
 # Full cleanup includes unused volumes and all unused images
@@ -107,7 +122,7 @@ if [ "$FULL_CLEANUP" = true ]; then
     log "  - Build cache"
     echo ""
     echo "Unused images that would be removed:"
-    docker images --filter "dangling=false" --format "  {{.Repository}}:{{.Tag}} ({{.Size}})" | head -10
+    "${DOCKER[@]}" images --filter "dangling=false" --format "  {{.Repository}}:{{.Tag}} ({{.Size}})" | head -10
   else
     # Warn user about destructive operation
     if [ "$INTERACTIVE" = true ] && [ "$FORCE" = false ]; then
@@ -138,13 +153,13 @@ if [ "$FULL_CLEANUP" = true ]; then
     # If --force is set, proceed without confirmation
 
     log "FULL CLEANUP: Removing all unused images..."
-    docker image prune -a -f >> "$LOG_FILE" 2>&1
+    "${DOCKER[@]}" image prune -a -f >> "$LOG_FILE" 2>&1
 
     log "FULL CLEANUP: Removing unused volumes..."
-    docker volume prune -f >> "$LOG_FILE" 2>&1
+    "${DOCKER[@]}" volume prune -f >> "$LOG_FILE" 2>&1
 
     log "FULL CLEANUP: Removing build cache..."
-    docker builder prune -f >> "$LOG_FILE" 2>&1
+    "${DOCKER[@]}" builder prune -f >> "$LOG_FILE" 2>&1
   fi
 fi
 
@@ -156,6 +171,6 @@ if [ "$DRY_RUN" = true ]; then
   echo "To perform actual cleanup, run without --dry-run flag"
 else
   log "Docker disk usage after cleanup:"
-  docker system df 2>&1 | while IFS= read -r line; do log "  $line"; done
+  "${DOCKER[@]}" system df 2>&1 | while IFS= read -r line; do log "  $line"; done
   log "=== Docker Cleanup Complete ==="
 fi

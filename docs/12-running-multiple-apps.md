@@ -17,7 +17,7 @@ nano compose.yml
 ../../scripts/secrets/create-secret.sh dev db_password
 
 # 4. Deploy
-docker compose up -d
+sudo docker compose up -d
 ```
 
 ## App Structure
@@ -56,7 +56,7 @@ http://staging-myapp.yourdomain.com {
 
 Reload Caddy after changes:
 ```bash
-docker compose -f infra/reverse-proxy/compose.yml restart caddy
+sudo docker compose -f infra/reverse-proxy/compose.yml restart caddy
 ```
 
 ## Database Per App
@@ -110,20 +110,20 @@ deploy:
 
 ```bash
 # Start app
-docker compose -f apps/myapp/compose.yml up -d
+sudo docker compose -f apps/myapp/compose.yml up -d
 
 # View logs
-docker compose -f apps/myapp/compose.yml logs -f
+sudo docker compose -f apps/myapp/compose.yml logs -f
 
 # Restart
-docker compose -f apps/myapp/compose.yml restart
+sudo docker compose -f apps/myapp/compose.yml restart
 
 # Stop
-docker compose -f apps/myapp/compose.yml down
+sudo docker compose -f apps/myapp/compose.yml down
 
 # Update
-docker compose -f apps/myapp/compose.yml pull
-docker compose -f apps/myapp/compose.yml up -d
+sudo docker compose -f apps/myapp/compose.yml pull
+sudo docker compose -f apps/myapp/compose.yml up -d
 ```
 
 ## Common Patterns
@@ -136,8 +136,10 @@ services:
     image: myapp
     environment:
       - DATABASE_URL_FILE=/run/secrets/database_url
+    group_add:
+      - "1999"
     volumes:
-      - ../../secrets/${ENVIRONMENT}/database_url.txt:/run/secrets/database_url:ro
+      - /var/secrets/${ENVIRONMENT}/database_url.txt:/run/secrets/database_url:ro
     depends_on:
       - db
 
@@ -145,9 +147,11 @@ services:
     image: postgres:16-alpine
     environment:
       - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+    group_add:
+      - "1999"
     volumes:
       - db_data:/var/lib/postgresql/data
-      - ../../secrets/${ENVIRONMENT}/db_password.txt:/run/secrets/db_password:ro
+      - /var/secrets/${ENVIRONMENT}/db_password.txt:/run/secrets/db_password:ro
 ```
 
 ### App with Redis Cache
@@ -180,19 +184,19 @@ services:
 
 **App not reachable?**
 ```bash
-docker compose ps                    # Is it running?
-docker compose logs                  # Any errors?
-docker network ls | grep web         # On right network?
+sudo docker compose ps                    # Is it running?
+sudo docker compose logs                  # Any errors?
+sudo docker network ls | grep web         # On right network?
 ```
 
 **Database connection failed?**
 ```bash
-docker compose exec app ping db      # Can app reach db?
-docker compose logs db               # DB healthy?
+sudo docker compose exec app ping db      # Can app reach db?
+sudo docker compose logs db               # DB healthy?
 ```
 
 **Out of memory?**
 ```bash
-docker stats                         # Who's using what?
+sudo docker stats                         # Who's using what?
 ./scripts/monitoring/status.sh       # System overview
 ```

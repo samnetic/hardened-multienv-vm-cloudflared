@@ -1,6 +1,8 @@
 # Secrets Management
 
-This directory contains secret files for each environment. **Secret files are NOT tracked in git.**
+Secrets are stored on the server in `/var/secrets/<env>/` and mounted into containers as read-only files under `/run/secrets/`.
+
+This `secrets/` directory exists mainly for documentation (and optional local dev). **Do not commit secrets to git.**
 
 ## Quick Start
 
@@ -15,23 +17,18 @@ This directory contains secret files for each environment. **Secret files are NO
 ./scripts/secrets/rotate-secret.sh <environment> <secret_name>
 ```
 
-## Directory Structure
+## Server Directory Structure
 
 ```
-secrets/
-├── .gitignore         # Ignores *.txt and other secret files
-├── README.md          # This file
-├── dev/               # Development secrets
-│   └── .gitkeep
-├── staging/           # Staging secrets
-│   └── .gitkeep
-└── production/        # Production secrets
-    └── .gitkeep
+/var/secrets/
+├── dev/
+├── staging/
+└── production/
 ```
 
 ## How File-Based Secrets Work
 
-Instead of putting secrets in environment variables (visible in `docker inspect`), we:
+Instead of putting secrets in environment variables (visible in `sudo docker inspect`), we:
 
 1. **Store secrets in files** with restrictive permissions (`chmod 600`)
 2. **Mount files into containers** at `/run/secrets/<name>` (read-only)
@@ -44,8 +41,10 @@ services:
   app:
     environment:
       - DATABASE_PASSWORD_FILE=/run/secrets/db_password
+    group_add:
+      - "1999" # hosting-secrets (so non-root containers can read the mounted secrets)
     volumes:
-      - ../../secrets/${ENVIRONMENT}/db_password.txt:/run/secrets/db_password:ro
+      - /var/secrets/${ENVIRONMENT}/db_password.txt:/run/secrets/db_password:ro
 ```
 
 ### Example app code (Node.js)
@@ -85,7 +84,7 @@ db_password = get_secret('DATABASE_PASSWORD')
 | Method | Security Issue |
 |--------|---------------|
 | `.env` files | Accidentally committed to git |
-| Environment variables | Visible in `docker inspect`, process listings |
+| Environment variables | Visible in `sudo docker inspect`, process listings |
 | **File-based secrets** | Only root/container can read, not in inspect output |
 
 ## Creating Secrets
@@ -116,13 +115,13 @@ op read "op://Vault/Item/password" | ./scripts/secrets/create-secret.sh producti
 
 ```bash
 ./scripts/secrets/rotate-secret.sh staging db_password
-# Creates backup at secrets/staging/.backups/db_password.<timestamp>.txt
+# Creates backup at /var/secrets/staging/.backups/db_password.<timestamp>.txt
 # Prompts for new value
 ```
 
 After rotating, redeploy the affected containers:
 ```bash
-docker compose -f apps/myapp/compose.yml up -d
+sudo docker compose -f apps/myapp/compose.yml up -d
 ```
 
 ## Backing Up Secrets
@@ -132,30 +131,34 @@ Secrets should be backed up securely (encrypted). Options:
 1. **Password manager** (1Password, Bitwarden, HashiCorp Vault)
 2. **Encrypted backup** using `age` or `gpg`:
    ```bash
-   tar -czf - secrets/ | age -r age1... > secrets-backup.tar.gz.age
+   sudo tar -czf - /var/secrets/ | age -r age1... > secrets-backup.tar.gz.age
    ```
 3. **Cloud secrets manager** (AWS Secrets Manager, GCP Secret Manager)
 
 ## Permissions
 
-**Directories** should be `700` (owner only) and **files** should be `600` (owner read/write only):
+On the server, secrets are owned by `root:hosting-secrets` and should be:
+
+- Directories: `750`
+- Files: `640`
 
 ```bash
-# Set correct permissions after cloning or creating secrets
-chmod 700 secrets/dev secrets/staging secrets/production
-chmod 600 secrets/*/*.txt secrets/*/*.key 2>/dev/null || true
+# Fix permissions (server)
+sudo chown -R root:hosting-secrets /var/secrets
+sudo find /var/secrets -type d -exec chmod 750 {} \;
+sudo find /var/secrets -type f -name '*.txt' -exec chmod 640 {} \;
 
 # Verify permissions
-ls -la secrets/
-ls -la secrets/*/
+sudo ls -la /var/secrets/
+sudo ls -la /var/secrets/*/
 ```
 
 Expected output:
 ```
-drwx------  secrets/dev/
-drwx------  secrets/staging/
-drwx------  secrets/production/
--rw-------  secrets/production/db_password.txt
+drwxr-x---  /var/secrets/dev/
+drwxr-x---  /var/secrets/staging/
+drwxr-x---  /var/secrets/production/
+-rw-r-----  /var/secrets/production/db_password.txt
 ```
 
 ## Environments
@@ -165,3 +168,11 @@ drwx------  secrets/production/
 | `dev` | Local development, playground | Developer |
 | `staging` | Pre-production testing | CI/CD or admin |
 | `production` | Live environment | Admin only |
+
+## Local Development (Optional)
+
+If you want to store secrets inside the repo for local dev only:
+
+```bash
+SECRETS_DIR=./secrets ./scripts/secrets/create-secret.sh dev api_key
+```

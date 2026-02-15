@@ -100,6 +100,16 @@ check_cloudflared() {
 # Parse Arguments
 # =================================================================
 
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  echo "Usage:"
+  echo "  sudo $0 yourdomain.com [tunnel-name]"
+  echo ""
+  echo "Examples:"
+  echo "  sudo $0 example.com"
+  echo "  sudo $0 example.com production-tunnel"
+  exit 0
+fi
+
 if [ $# -lt 1 ]; then
   print_error "Domain name required"
   echo "Usage: sudo $0 yourdomain.com"
@@ -114,6 +124,16 @@ if [ -n "${SUDO_USER:-}" ]; then
   ORIGINAL_USER="$SUDO_USER"
 else
   ORIGINAL_USER="root"
+fi
+
+# Resolve home directory for ORIGINAL_USER (works for root and non-root).
+ORIGINAL_HOME="$(getent passwd "$ORIGINAL_USER" 2>/dev/null | cut -d: -f6 || true)"
+if [ -z "${ORIGINAL_HOME:-}" ]; then
+  if [ "$ORIGINAL_USER" = "root" ]; then
+    ORIGINAL_HOME="/root"
+  else
+    ORIGINAL_HOME="/home/$ORIGINAL_USER"
+  fi
 fi
 
 # =================================================================
@@ -137,7 +157,7 @@ main() {
   # =================================================================
   print_header "Step 1/7: Authenticate with Cloudflare"
 
-  CERT_FILE="/home/$ORIGINAL_USER/.cloudflared/cert.pem"
+  CERT_FILE="${ORIGINAL_HOME}/.cloudflared/cert.pem"
   if [ -f "$CERT_FILE" ]; then
     print_success "Already authenticated (cert.pem exists)"
   else
@@ -162,12 +182,10 @@ main() {
   # =================================================================
   print_header "Step 2/7: Create Tunnel"
 
-  # Check if tunnel already exists
-  EXISTING_TUNNEL=$(su - "$ORIGINAL_USER" -c "cloudflared tunnel list" 2>/dev/null | grep "$TUNNEL_NAME" || true)
-
-  if [ -n "$EXISTING_TUNNEL" ]; then
+  # Check if tunnel already exists (exact name match; avoid substring collisions).
+  TUNNEL_ID="$(su - "$ORIGINAL_USER" -c "cloudflared tunnel list" 2>/dev/null | awk -v name="$TUNNEL_NAME" '$2 == name {print $1; exit}' || true)"
+  if [ -n "$TUNNEL_ID" ]; then
     print_warning "Tunnel '$TUNNEL_NAME' already exists"
-    TUNNEL_ID=$(echo "$EXISTING_TUNNEL" | awk '{print $1}')
     print_info "Using existing tunnel ID: $TUNNEL_ID"
   else
     print_step "Creating tunnel '$TUNNEL_NAME'..."
@@ -188,22 +206,46 @@ main() {
   fi
 
   # =================================================================
-  # Step 3: Copy Credentials to Root
+  # Step 3: Install Credentials for Service
   # =================================================================
-  print_header "Step 3/7: Copy Credentials"
+  print_header "Step 3/7: Install Tunnel Credentials"
 
-  CREDS_FILE="/home/$ORIGINAL_USER/.cloudflared/${TUNNEL_ID}.json"
-  ROOT_CREDS_FILE="/root/.cloudflared/${TUNNEL_ID}.json"
+  CREDS_FILE="${ORIGINAL_HOME}/.cloudflared/${TUNNEL_ID}.json"
 
   if [ ! -f "$CREDS_FILE" ]; then
     print_error "Credentials file not found: $CREDS_FILE"
     exit 1
   fi
 
-  mkdir -p /root/.cloudflared
-  cp "$CREDS_FILE" "$ROOT_CREDS_FILE"
-  chmod 600 "$ROOT_CREDS_FILE"
-  print_success "Credentials copied to $ROOT_CREDS_FILE"
+  # Run the daemon as a locked-down system user (not root)
+  CLOUD_USER="cloudflared"
+  CLOUD_GROUP="cloudflared"
+  if ! getent group "$CLOUD_GROUP" >/dev/null 2>&1; then
+    print_step "Creating system group: $CLOUD_GROUP"
+    groupadd --system "$CLOUD_GROUP"
+    print_success "Created group: $CLOUD_GROUP"
+  fi
+  if ! id "$CLOUD_USER" >/dev/null 2>&1; then
+    print_step "Creating system user: $CLOUD_USER"
+    useradd --system --no-create-home --home-dir /var/lib/cloudflared --shell /usr/sbin/nologin --gid "$CLOUD_GROUP" "$CLOUD_USER"
+    print_success "Created user: $CLOUD_USER"
+  else
+    print_success "System user exists: $CLOUD_USER"
+  fi
+
+  # Ensure state directory exists (some cloudflared builds may want a writable HOME).
+  install -d -m 0750 -o "$CLOUD_USER" -g "$CLOUD_GROUP" /var/lib/cloudflared
+
+  CONFIG_DIR="/etc/cloudflared"
+  mkdir -p "$CONFIG_DIR"
+  chown root:"$CLOUD_USER" "$CONFIG_DIR"
+  chmod 750 "$CONFIG_DIR"
+
+  SERVICE_CREDS_FILE="${CONFIG_DIR}/${TUNNEL_ID}.json"
+  cp "$CREDS_FILE" "$SERVICE_CREDS_FILE"
+  chown root:"$CLOUD_USER" "$SERVICE_CREDS_FILE"
+  chmod 640 "$SERVICE_CREDS_FILE"
+  print_success "Credentials installed at $SERVICE_CREDS_FILE (root:$CLOUD_USER, 640)"
 
   # =================================================================
   # Step 4: Generate Configuration
@@ -224,7 +266,7 @@ main() {
 # =================================================================
 
 tunnel: $TUNNEL_ID
-credentials-file: $ROOT_CREDS_FILE
+credentials-file: $SERVICE_CREDS_FILE
 
 ingress:
   # SSH access via tunnel
@@ -238,6 +280,9 @@ ingress:
 protocol: quic
 loglevel: info
 EOF
+
+  chown root:"$CLOUD_USER" "$CONFIG_FILE"
+  chmod 640 "$CONFIG_FILE"
 
   print_success "Configuration created at $CONFIG_FILE"
   echo ""
@@ -253,8 +298,14 @@ EOF
   print_step "Routing ssh.$DOMAIN to tunnel..."
 
   # Route SSH subdomain
-  if su - "$ORIGINAL_USER" -c "cloudflared tunnel route dns $TUNNEL_NAME ssh.$DOMAIN" 2>&1 | grep -q "already exists"; then
+  route_rc=0
+  route_out="$(su - "$ORIGINAL_USER" -c "cloudflared tunnel route dns $TUNNEL_NAME ssh.$DOMAIN" 2>&1)" || route_rc=$?
+  if echo "$route_out" | grep -qi "already exists"; then
     print_warning "DNS route for ssh.$DOMAIN already exists"
+  elif [ "$route_rc" -ne 0 ]; then
+    print_error "Failed to create DNS route for ssh.$DOMAIN (exit code: $route_rc)"
+    echo "$route_out"
+    exit 1
   else
     print_success "DNS route created: ssh.$DOMAIN → tunnel"
   fi
@@ -273,10 +324,8 @@ EOF
 
   echo "Cloudflare API configuration allows automatic setup of SSL/TLS settings"
   echo ""
-  read -rp "Configure Cloudflare settings via API? (yes/no): " CONFIGURE_CF_API
-
   SSL_CONFIGURED=false
-  if [ "$CONFIGURE_CF_API" = "yes" ]; then
+  if confirm "Configure Cloudflare settings via API?" "n"; then
     # Source the Cloudflare API helper
     SCRIPT_DIR_CF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     source "$SCRIPT_DIR_CF/cloudflare-api-setup.sh"
@@ -298,7 +347,7 @@ EOF
     print_info "Skipping Cloudflare API configuration"
     echo ""
     print_warning "Remember to set SSL/TLS mode manually:"
-    echo "  Cloudflare Dashboard → SSL/TLS → Overview → Encryption mode: Flexible"
+    echo "  Cloudflare Dashboard → SSL/TLS → Overview → Encryption mode: Full"
     echo ""
   fi
 
@@ -309,6 +358,49 @@ EOF
 
   print_step "Installing cloudflared service..."
   cloudflared service install 2>/dev/null || print_warning "Service already installed"
+
+  print_step "Hardening cloudflared systemd unit..."
+  OVERRIDE_DIR="/etc/systemd/system/cloudflared.service.d"
+  mkdir -p "$OVERRIDE_DIR"
+  cat > "$OVERRIDE_DIR/override.conf" <<'EOF'
+[Service]
+User=cloudflared
+Group=cloudflared
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectControlGroups=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+# AF_NETLINK is commonly required for querying interfaces/routes on Linux.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+# Writable state locations (required when ProtectSystem=strict is used).
+StateDirectory=cloudflared
+StateDirectoryMode=0750
+RuntimeDirectory=cloudflared
+RuntimeDirectoryMode=0750
+LogsDirectory=cloudflared
+LogsDirectoryMode=0750
+
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+EOF
+
+  systemctl daemon-reload
+  print_success "systemd hardening override installed"
 
   print_step "Starting cloudflared service..."
   systemctl enable cloudflared
@@ -392,37 +484,37 @@ EOF
   if [ "$SSL_CONFIGURED" = true ]; then
     echo -e "2. ${BOLD}SSL/TLS Configuration${NC}"
     echo "   ${GREEN}✓ Configured automatically!${NC}"
-    echo "     • Flexible mode enabled"
+    echo "     • Full mode enabled"
     echo "     • Always Use HTTPS enabled"
     echo "     • Automatic HTTPS Rewrites enabled"
     echo ""
   else
-    echo -e "2. ${BOLD}Set SSL/TLS Mode to Flexible${NC}"
+    echo -e "2. ${BOLD}Set SSL/TLS Mode to Full${NC}"
     echo -e "   ${YELLOW}⚠ MANUAL STEP REQUIRED${NC}"
     echo "   Go to: https://dash.cloudflare.com → $DOMAIN → SSL/TLS"
-    echo "   Set Encryption mode to: Flexible"
+    echo "   Set Encryption mode to: Full"
     echo ""
   fi
   echo -e "3. ${BOLD}Set Up Local Machine for Tunnel SSH${NC}"
   echo -e "   ${CYAN}Run this on YOUR LOCAL MACHINE (not the server):${NC}"
   echo ""
   echo "   # Automated setup for sysadmin user:"
-  echo "   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.$DOMAIN sysadmin"
+  echo "   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.$DOMAIN sysadmin"
   echo ""
   echo "   # For appmgr user (CI/CD):"
-  echo "   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/master/scripts/setup-local-ssh.sh | bash -s -- ssh.$DOMAIN appmgr"
+  echo "   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.$DOMAIN appmgr"
   echo ""
   echo "   # Or manual installation:"
   echo "   macOS: brew install cloudflared"
-  echo "   Ubuntu: curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb && sudo dpkg -i cloudflared.deb"
+  echo "   Debian/Ubuntu: install via official repo (recommended): https://pkg.cloudflare.com/cloudflared"
   echo ""
   echo -e "4. ${BOLD}Test SSH via Tunnel${NC}"
   echo "   ssh ${DOMAIN%%.*}        # Connects as sysadmin"
   echo "   ssh ${DOMAIN%%.*}-appmgr # Connects as appmgr"
   echo ""
   echo -e "5. ${BOLD}Start Caddy Reverse Proxy${NC}"
-  echo "   cd /opt/hosting-blueprint/infra/reverse-proxy"
-  echo "   docker compose up -d"
+  echo "   cd /srv/infrastructure/reverse-proxy"
+  echo "   sudo docker compose up -d"
   echo ""
   echo -e "6. ${BOLD}Finalize Setup (Automated - Recommended)${NC}"
   echo -e "   ${CYAN}Run the automated finalization script:${NC}"

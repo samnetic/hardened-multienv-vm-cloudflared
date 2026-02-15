@@ -75,7 +75,7 @@ psql -h staging-db.yourdomain.com -U myuser -d mydb
 # Connection refused - database not exposed
 
 # Database only accessible from staging containers
-docker exec staging-app psql -h staging-db -U myuser -d mydb
+sudo docker exec staging-app psql -h staging-db -U myuser -d mydb
 # This works - container-to-container on internal network
 ```
 
@@ -152,7 +152,7 @@ Automatic deployments to production are risky:
 Each environment has its own secrets:
 
 ```
-secrets/
+/var/secrets/
 ├── dev/
 │   ├── db_password.txt      # Can be simple for dev
 │   └── api_key.txt          # Test API keys

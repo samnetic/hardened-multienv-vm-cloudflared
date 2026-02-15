@@ -1,0 +1,27 @@
+# Prometheus config (monitoring VPS)
+#
+# This default config is intentionally "quiet":
+# - scrapes Prometheus itself only
+# - ships alert rules, but they will not fire until you add targets
+#
+# To scrape app VPS metrics through Cloudflare Access Service Auth:
+# - copy configs/prometheus.yml.example and customize targets
+# - ensure CF Access service token secrets are created on the monitoring VPS
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+

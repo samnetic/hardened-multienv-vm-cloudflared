@@ -45,7 +45,8 @@ fi
 
 # Escape special characters for sed (/, &, \)
 escape_sed() {
-  printf '%s\n' "$1" | sed 's/[&/\]/\\&/g'
+  # Escape for sed replacement: backslash, slash, ampersand.
+  printf '%s\n' "$1" | sed -e 's/[\\/&]/\\&/g'
 }
 DOMAIN_ESCAPED=$(escape_sed "$DOMAIN")
 
@@ -57,15 +58,28 @@ else
   HOSTNAME="${DOMAIN%%.*}"
 fi
 
+# Target root selection:
+# - Prefer /srv/infrastructure when present (keeps /opt/hosting-blueprint clean/updatable)
+# - Fall back to editing the blueprint template (useful for local testing)
+INFRA_ROOT="${INFRA_ROOT:-}"
+if [ -z "${INFRA_ROOT:-}" ]; then
+  if [ -d "/srv/infrastructure/reverse-proxy" ]; then
+    INFRA_ROOT="/srv/infrastructure"
+  else
+    INFRA_ROOT="${REPO_DIR}/infra"
+  fi
+fi
+
 echo ""
 echo -e "${CYAN}Configuring domain: ${DOMAIN}${NC}"
 echo -e "${CYAN}Hostname: ${HOSTNAME}${NC}"
+echo -e "${CYAN}Target: ${INFRA_ROOT}${NC}"
 echo ""
 
 # =================================================================
 # Update Caddyfile
 # =================================================================
-CADDYFILE="${REPO_DIR}/infra/reverse-proxy/Caddyfile"
+CADDYFILE="${INFRA_ROOT}/reverse-proxy/Caddyfile"
 if [ -f "$CADDYFILE" ]; then
   if grep -q "yourdomain.com" "$CADDYFILE"; then
     sed -i "s/yourdomain\.com/${DOMAIN_ESCAPED}/g" "$CADDYFILE"
@@ -80,8 +94,8 @@ fi
 # =================================================================
 # Update Cloudflared Config (if exists)
 # =================================================================
-CLOUDFLARED_CONFIG="${REPO_DIR}/infra/cloudflared/config.yml"
-CLOUDFLARED_EXAMPLE="${REPO_DIR}/infra/cloudflared/config.yml.example"
+CLOUDFLARED_CONFIG="${INFRA_ROOT}/cloudflared/config.yml"
+CLOUDFLARED_EXAMPLE="${INFRA_ROOT}/cloudflared/config.yml.example"
 
 # Create config.yml from example if it doesn't exist
 if [ ! -f "$CLOUDFLARED_CONFIG" ] && [ -f "$CLOUDFLARED_EXAMPLE" ]; then
@@ -96,18 +110,11 @@ if [ -f "$CLOUDFLARED_CONFIG" ]; then
   fi
 fi
 
-if [ -f "$CLOUDFLARED_EXAMPLE" ]; then
-  if grep -q "yourdomain.com" "$CLOUDFLARED_EXAMPLE"; then
-    sed -i "s/yourdomain\.com/${DOMAIN_ESCAPED}/g" "$CLOUDFLARED_EXAMPLE"
-    echo -e "${GREEN}✓${NC} Updated cloudflared config example"
-  fi
-fi
-
 # =================================================================
 # Update Netdata .env
 # =================================================================
-NETDATA_ENV="${REPO_DIR}/infra/monitoring/.env"
-NETDATA_EXAMPLE="${REPO_DIR}/infra/monitoring/.env.example"
+NETDATA_ENV="${INFRA_ROOT}/monitoring/.env"
+NETDATA_EXAMPLE="${INFRA_ROOT}/monitoring/.env.example"
 
 if [ -f "$NETDATA_EXAMPLE" ]; then
   sed -i "s/HOSTNAME=.*/HOSTNAME=${HOSTNAME}/" "$NETDATA_EXAMPLE"
@@ -167,5 +174,5 @@ echo "  • ssh.${DOMAIN}           → SSH via tunnel"
 echo ""
 echo "Next steps:"
 echo "  1. Add DNS records in Cloudflare (CNAME to tunnel)"
-echo "  2. Reload Caddy: docker compose -f infra/reverse-proxy/compose.yml restart"
+echo "  2. Reload Caddy: sudo docker compose -f ${INFRA_ROOT}/reverse-proxy/compose.yml restart"
 echo ""

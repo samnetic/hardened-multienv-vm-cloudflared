@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# =================================================================
+# hosting-ci-ssh (ForceCommand wrapper for appmgr)
+# =================================================================
+# This script is invoked via sshd ForceCommand for the `appmgr` user.
+# It allows ONLY a small set of CI/GitOps operations and denies
+# arbitrary shell access.
+#
+# Allowed commands (examples):
+#   ssh appmgr@ssh.example.com "hosting sync dev"      < archive.tgz
+#   ssh appmgr@ssh.example.com "hosting deploy dev <ref>"
+#   ssh appmgr@ssh.example.com "hosting status dev"
+#
+# Design goals:
+# - No eval
+# - No arbitrary arguments / command injection
+# - All privileged actions go through a root-owned tool:
+#     /usr/local/sbin/hosting-deploy
+# =================================================================
+
+set -euo pipefail
+
+ORIGINAL="${SSH_ORIGINAL_COMMAND:-}"
+
+deny() {
+  echo "DENIED: $*" >&2
+  exit 1
+}
+
+usage() {
+  cat >&2 <<'EOF'
+This account is restricted for CI/CD.
+
+Allowed commands:
+  hosting sync <dev|staging|production>
+  hosting deploy <dev|staging|production> [ref]
+  hosting status <dev|staging|production>
+EOF
+  exit 1
+}
+
+if [ -z "$ORIGINAL" ]; then
+  usage
+fi
+
+# Split on whitespace only; we do not interpret quotes.
+read -r -a argv <<<"$ORIGINAL"
+
+if [ "${#argv[@]}" -lt 3 ]; then
+  usage
+fi
+
+if [ "${argv[0]}" != "hosting" ]; then
+  deny "Only 'hosting' commands are allowed"
+fi
+
+sub="${argv[1]}"
+env="${argv[2]}"
+ref="${argv[3]:-}"
+
+case "$sub" in
+  sync|deploy|status) ;;
+  *) deny "Unknown subcommand '$sub'";;
+esac
+
+case "$env" in
+  dev|staging|production) ;;
+  *) deny "Invalid environment '$env'";;
+esac
+
+# Deny extra arguments to keep the sudoers surface minimal.
+case "$sub" in
+  sync|status)
+    if [ "${#argv[@]}" -ne 3 ]; then
+      deny "Unexpected arguments for '$sub'"
+    fi
+    ;;
+  deploy)
+    if [ "${#argv[@]}" -ne 3 ] && [ "${#argv[@]}" -ne 4 ]; then
+      deny "Unexpected arguments for 'deploy'"
+    fi
+    ;;
+esac
+
+DEPLOY_TOOL="/usr/local/sbin/hosting-deploy"
+if [ ! -x "$DEPLOY_TOOL" ]; then
+  deny "Missing deploy tool: $DEPLOY_TOOL (run setup-vm.sh to install)"
+fi
+
+case "$sub" in
+  sync)
+    # stdin carries the archive stream from CI.
+    exec /usr/bin/sudo -n "$DEPLOY_TOOL" sync --env "$env"
+    ;;
+  deploy)
+    if [ -n "$ref" ]; then
+      exec /usr/bin/sudo -n "$DEPLOY_TOOL" deploy --env "$env" --ref "$ref"
+    fi
+    exec /usr/bin/sudo -n "$DEPLOY_TOOL" deploy --env "$env"
+    ;;
+  status)
+    exec /usr/bin/sudo -n "$DEPLOY_TOOL" status --env "$env"
+    ;;
+esac
+

@@ -77,6 +77,12 @@ check_prerequisites() {
   if command -v gh &> /dev/null; then
     local gh_version=$(gh --version | head -1)
     print_success "GitHub CLI installed ($gh_version)"
+
+    # Optional: sync the expected GitHub account for this directory (multi-account setups)
+    if command -v gh-account-switcher &>/dev/null; then
+      print_step "Syncing GitHub account (gh-account-switcher)..."
+      gh-account-switcher sync >/dev/null 2>&1 || print_warning "gh-account-switcher sync failed (continuing)"
+    fi
   else
     print_error "GitHub CLI (gh) not found"
     print_info "Install: https://cli.github.com/"
@@ -150,10 +156,10 @@ get_repo_info() {
   case "$choice" in
     1)
       print_step "Creating fork from template..."
-      read -p "Enter your repository name [hardened-multienv-vm]: " repo_name
-      repo_name=${repo_name:-hardened-multienv-vm}
+      read -p "Enter your repository name [hardened-multienv-vm-cloudflared]: " repo_name
+      repo_name=${repo_name:-hardened-multienv-vm-cloudflared}
 
-      if gh repo create "$repo_name" --template samnetic/hardened-multienv-vm --private --clone; then
+      if gh repo create "$repo_name" --template samnetic/hardened-multienv-vm-cloudflared --private --clone; then
         REPO_PATH="$repo_name"
         REPO_FULL=$(gh repo view "$repo_name" --json nameWithOwner -q .nameWithOwner)
         cd "$REPO_PATH"
@@ -200,7 +206,9 @@ setup_github_secrets() {
   echo "  • SSH_PRIVATE_KEY - appmgr user's private SSH key"
   echo "  • SSH_HOST - Your VM's SSH hostname (ssh.yourdomain.com)"
   echo "  • SSH_USER - Usually 'appmgr'"
-  echo "  • CF_API_TOKEN - Cloudflare API token (optional, for DNS)"
+  echo "  • SSH_KNOWN_HOSTS - known_hosts entries for SSH_HOST (pin host key)"
+  echo "  • CF_SERVICE_TOKEN_ID - Cloudflare Access service token ID (CI)"
+  echo "  • CF_SERVICE_TOKEN_SECRET - Cloudflare Access service token secret (CI)"
   echo
 
   if ! confirm "Set up GitHub Actions secrets now?"; then
@@ -248,24 +256,48 @@ setup_github_secrets() {
     fi
   fi
 
-  # Cloudflare API Token (optional)
+  # SSH_KNOWN_HOSTS (recommended)
   echo
-  if confirm "Set up Cloudflare API token for DNS management?"; then
-    echo
-    print_info "Get your Cloudflare API token:"
-    echo "  1. Go to: https://dash.cloudflare.com/profile/api-tokens"
-    echo "  2. Create Token → Edit zone DNS template"
-    echo "  3. Copy the token"
-    echo
-    read -sp "Paste Cloudflare API Token (hidden): " cf_token
-    echo
-
-    if [ -n "$cf_token" ]; then
-      if gh secret set CF_API_TOKEN --body "$cf_token" 2>/dev/null; then
-        print_success "CF_API_TOKEN set"
+  print_info "SSH known_hosts pinning (prevents MITM)"
+  echo "Generate on the VM with:"
+  echo "  ./scripts/ssh/print-known-hosts.sh ssh.yourdomain.com"
+  echo ""
+  echo "Paste the known_hosts line(s) below."
+  echo -e "${YELLOW}Press Ctrl+D when done${NC}"
+  echo
+  if ssh_known_hosts=$(cat); then
+    if [ -n "$ssh_known_hosts" ]; then
+      if echo "$ssh_known_hosts" | gh secret set SSH_KNOWN_HOSTS 2>/dev/null; then
+        print_success "SSH_KNOWN_HOSTS set"
       else
-        print_warning "Failed to set CF_API_TOKEN"
+        print_warning "Failed to set SSH_KNOWN_HOSTS"
       fi
+    fi
+  fi
+
+  # Cloudflare Access service token for CI (required)
+  echo
+  print_info "Cloudflare Access Service Token (CI/CD)"
+  echo "Create in: Cloudflare Zero Trust → Access → Service Auth → Service Tokens"
+  echo "Then paste the Client ID and Client Secret."
+  echo ""
+  read -rp "Service Token Client ID: " cf_service_token_id
+  read -sp "Service Token Client Secret (hidden): " cf_service_token_secret
+  echo
+
+  if [ -n "${cf_service_token_id:-}" ]; then
+    if gh secret set CF_SERVICE_TOKEN_ID --body "$cf_service_token_id" 2>/dev/null; then
+      print_success "CF_SERVICE_TOKEN_ID set"
+    else
+      print_warning "Failed to set CF_SERVICE_TOKEN_ID"
+    fi
+  fi
+
+  if [ -n "${cf_service_token_secret:-}" ]; then
+    if gh secret set CF_SERVICE_TOKEN_SECRET --body "$cf_service_token_secret" 2>/dev/null; then
+      print_success "CF_SERVICE_TOKEN_SECRET set"
+    else
+      print_warning "Failed to set CF_SERVICE_TOKEN_SECRET"
     fi
   fi
 
@@ -289,9 +321,11 @@ configure_workflow() {
 
   print_info "Deployment workflow found"
   print_info "This workflow will:"
-  echo "  • Run on push to main, staging, or production branches"
-  echo "  • Deploy to corresponding environment"
-  echo "  • Restart Docker services on the VM"
+  echo "  • Auto-deploy on push:"
+  echo "    - feature/* → DEV"
+  echo "    - main      → STAGING"
+  echo "  • Manual deploy for PRODUCTION (workflow_dispatch + confirmation)"
+  echo "  • Deploy over Cloudflare Access SSH (Service Token)"
   echo
 
   if confirm "Enable GitHub Actions for this repository?"; then
@@ -318,19 +352,18 @@ test_deployment() {
   print_info "To test your CI/CD pipeline:"
   echo
   echo "1. Make a small change to your code"
-  echo "2. Commit and push to the dev branch:"
-  echo -e "   ${CYAN}git checkout -b dev${NC}"
+  echo "2. Commit and push a feature branch (auto-deploys to DEV):"
+  echo -e "   ${CYAN}git checkout -b feature/test-deploy${NC}"
   echo -e "   ${CYAN}echo '# Test' >> README.md${NC}"
   echo -e "   ${CYAN}git add README.md${NC}"
   echo -e "   ${CYAN}git commit -m 'Test deployment'${NC}"
-  echo -e "   ${CYAN}git push -u origin dev${NC}"
+  echo -e "   ${CYAN}git push -u origin feature/test-deploy${NC}"
   echo
   echo "3. Watch the deployment in GitHub Actions:"
   echo -e "   ${CYAN}gh run watch${NC}"
   echo
   echo "4. Verify on your VM:"
-  echo -e "   ${CYAN}ssh appmgr@ssh.yourdomain.com${NC}"
-  echo -e "   ${CYAN}docker ps${NC}"
+  echo -e "   ${CYAN}ssh yourdomain-appmgr \"hosting status dev\"${NC}"
   echo
 
   if confirm "Open GitHub Actions page in browser?"; then
@@ -352,18 +385,16 @@ display_next_steps() {
 
   print_header "Branching Strategy"
   echo
-  echo -e "${BLUE}Development → Staging → Production${NC}"
+  echo -e "${BLUE}Feature Branches → Staging (main) → Production (manual)${NC}"
   echo
-  echo "  dev branch       → Deploys to DEV environment"
-  echo "  staging branch   → Deploys to STAGING environment"
-  echo "  main branch      → Deploys to PRODUCTION environment"
-  echo "  tags (v*)        → Production releases"
+  echo "  feature/* branches → Auto-deploy to DEV environment"
+  echo "  main branch        → Auto-deploy to STAGING environment"
+  echo "  production         → Manual Deploy workflow (select version tag + confirm)"
   echo
 
   print_header "Typical Workflow"
   echo
-  echo "1. Create feature branch from dev:"
-  echo -e "   ${CYAN}git checkout dev${NC}"
+  echo "1. Create a feature branch:"
   echo -e "   ${CYAN}git checkout -b feature/my-feature${NC}"
   echo
   echo "2. Make changes, commit, and push:"
@@ -371,20 +402,17 @@ display_next_steps() {
   echo -e "   ${CYAN}git commit -m 'Add new feature'${NC}"
   echo -e "   ${CYAN}git push -u origin feature/my-feature${NC}"
   echo
-  echo "3. Create PR to dev branch:"
-  echo -e "   ${CYAN}gh pr create --base dev --title 'Add new feature'${NC}"
+  echo "3. Open a PR to main:"
+  echo -e "   ${CYAN}gh pr create --base main --title 'Add new feature'${NC}"
   echo
-  echo "4. Merge to dev → automatic deployment to DEV"
+  echo "4. Push/merge to feature/* → automatic deployment to DEV"
   echo
-  echo "5. When ready for staging:"
-  echo -e "   ${CYAN}git checkout staging${NC}"
-  echo -e "   ${CYAN}git merge dev${NC}"
-  echo -e "   ${CYAN}git push${NC}"
+  echo "5. Merge to main → automatic deployment to STAGING"
   echo
-  echo "6. When ready for production:"
-  echo -e "   ${CYAN}git checkout main${NC}"
-  echo -e "   ${CYAN}git merge staging${NC}"
-  echo -e "   ${CYAN}git push${NC}"
+  echo "6. Deploy to production:"
+  echo -e "   ${CYAN}git tag v1.0.0 && git push origin v1.0.0${NC}"
+  echo "   Then run the Deploy workflow (Actions → Deploy → Run workflow)"
+  echo "   Select environment=production, version=v1.0.0, confirm=DEPLOY"
   echo
 
   print_header "Useful Commands"
@@ -405,7 +433,7 @@ display_next_steps() {
   print_header "Documentation"
   echo
   echo "  • .github/workflows/ - Workflow definitions"
-  echo "  • docs/gitops-workflow.md - Full GitOps guide"
+  echo "  • docs/07-gitops-workflow.md - Full GitOps guide"
   echo "  • README.md - Repository overview"
   echo
 

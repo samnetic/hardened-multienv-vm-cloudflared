@@ -5,6 +5,11 @@
 #
 # Access: http://monitoring.yourdomain.com (add to Caddyfile)
 # Or locally: http://localhost:19999
+#
+# SECURITY WARNING:
+# For deep host/container monitoring, Netdata often needs elevated visibility
+# (extra capabilities, AppArmor relaxation, and/or docker.sock). If you want the
+# tightest blast radius, prefer `infra/monitoring-agent` + a separate monitoring VPS.
 # =================================================================
 
 services:

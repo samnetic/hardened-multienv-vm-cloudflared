@@ -125,12 +125,14 @@ sudo auditctl -l | head -10
 ```bash
 sudo systemctl status unattended-upgrades
 cat /etc/apt/apt.conf.d/50unattended-upgrades | grep -E "Automatic-Reboot|Allowed-Origins"
+sudo systemctl list-timers --all | grep hosting-cloudflared-upgrade || true
 ```
 
 ### Checklist
 
 - [ ] unattended-upgrades installed and running
 - [ ] Security updates enabled
+- [ ] cloudflared auto-upgrade timer enabled (`hosting-cloudflared-upgrade.timer`)
 - [ ] Automatic reboot enabled (for kernel updates)
 - [ ] Reboot time set (default 02:30)
 
@@ -152,15 +154,20 @@ cat /etc/docker/daemon.json
   "live-restore": true,
   "userland-proxy": false,
   "no-new-privileges": true,
-  "icc": false
+  "icc": false,
+  "ip": "127.0.0.1"
 }
 ```
+
+Notes:
+- `ip: 127.0.0.1` makes Docker’s default published-port bind loopback-only (helps preserve the tunnel-only model).
+- You may also see `metrics-addr` (Docker daemon metrics; keep firewalled) and `default-address-pools` (normal in this blueprint).
 
 ### Verify Container Defaults
 
 ```bash
 # Check a running container
-docker inspect mycontainer | jq '.[0].HostConfig.SecurityOpt'
+sudo docker inspect mycontainer | jq '.[0].HostConfig.SecurityOpt'
 # Should include "no-new-privileges"
 ```
 
@@ -180,9 +187,10 @@ docker inspect mycontainer | jq '.[0].HostConfig.SecurityOpt'
 ### Verify Networks
 
 ```bash
-docker network ls | grep -E "dev-|staging-|prod-"
-docker network inspect staging-backend | jq '.[0].Internal'
-docker network inspect prod-backend | jq '.[0].Internal'
+sudo docker network ls | grep -E "dev-|staging-|prod-|hosting-caddy-origin"
+sudo docker network inspect staging-backend | jq '.[0].Internal'
+sudo docker network inspect prod-backend | jq '.[0].Internal'
+sudo docker network inspect hosting-caddy-origin --format 'internal={{.Internal}} gateway={{(index .IPAM.Config 0).Gateway}}'
 ```
 
 ### Checklist
@@ -190,6 +198,7 @@ docker network inspect prod-backend | jq '.[0].Internal'
 - [ ] dev-backend is NOT internal (bridge, for local dev access)
 - [ ] staging-backend IS internal
 - [ ] prod-backend IS internal
+- [ ] hosting-caddy-origin is internal and gateway is `10.250.0.1` (Caddy tunnel-only enforcement)
 - [ ] Apps and databases on separate networks
 
 ---
@@ -202,21 +211,40 @@ docker network inspect prod-backend | jq '.[0].Internal'
 # Check sysadmin has sudo
 groups sysadmin
 
-# Check appmgr has docker but NOT sudo
+# Check appmgr is restricted (no docker group, no sudo shell)
 groups appmgr
 
-# Check no password login
-sudo cat /etc/shadow | grep -E "sysadmin|appmgr"
-# Should show ! or * (no password)
+# Check SSH restriction is installed for appmgr
+sudo grep -n "ForceCommand /usr/local/sbin/hosting-ci-ssh" /etc/ssh/sshd_config.d/99-appmgr-ci.conf
+
+# Check password lock status (SSH password auth is disabled regardless)
+sudo passwd -S sysadmin
+sudo passwd -S appmgr
+
+# Expected:
+# - sysadmin: P (password set) if SYSADMIN_SUDO_MODE=password, or NP/L if SYSADMIN_SUDO_MODE=nopasswd
+# - appmgr:   L (locked)
 ```
 
 ### Checklist
 
 - [ ] sysadmin user exists with sudo
 - [ ] appmgr user exists WITHOUT sudo
-- [ ] appmgr has docker group
+- [ ] sysadmin is NOT in docker group (prevents docker-socket root escalation without sudo password)
+- [ ] appmgr is NOT in docker group
+- [ ] appmgr is restricted via sshd `ForceCommand` to `hosting ...` only
 - [ ] No password authentication (keys only)
 - [ ] Root direct login disabled
+
+---
+
+## GitOps / CI Security
+
+### Checklist
+
+- [ ] Cloudflare Access protects `ssh.<domain>` (SSO for humans, Service Tokens for CI)
+- [ ] GitHub Actions pins SSH host key (`SSH_KNOWN_HOSTS`) and does not disable host key checking
+- [ ] CI uses a dedicated deploy key (not a personal workstation key)
 
 ---
 
@@ -225,16 +253,33 @@ sudo cat /etc/shadow | grep -E "sysadmin|appmgr"
 ### Verify Permissions
 
 ```bash
-ls -la secrets/*/
-# All .txt files should be 600
+sudo ls -la /var/secrets/*/
+# All .txt files should be root:hosting-secrets 640
 ```
 
 ### Checklist
 
-- [ ] Secret files have 600 permissions
-- [ ] secrets/ directory gitignored
+- [ ] Secret files have 640 permissions (root:hosting-secrets)
+- [ ] Secrets stored in /var/secrets (not in git)
 - [ ] No secrets in environment variables (use _FILE pattern)
 - [ ] Different secrets per environment
+
+---
+
+## Optional Security Tools
+
+If you want file integrity monitoring and periodic audits:
+
+```bash
+sudo ./scripts/security/setup-security-tools.sh
+```
+
+### Checklist
+
+- [ ] AIDE baseline initialized
+- [ ] Weekly Lynis + rkhunter scans scheduled (`/etc/cron.d/security-scans`)
+- [ ] Logs rotated (`/etc/logrotate.d/security-tools`)
+- [ ] Alerting configured (optional) via `/etc/hosting-blueprint/alerting.env`
 
 ---
 
@@ -285,10 +330,10 @@ for svc in fail2ban auditd unattended-upgrades cloudflared; do
 done
 
 echo -e "\n=== Docker ==="
-docker info 2>/dev/null | grep -E "Live Restore|Default Runtime"
+sudo docker info 2>/dev/null | grep -E "Live Restore|Default Runtime"
 
 echo -e "\n=== Networks ==="
-docker network ls 2>/dev/null | grep -E "dev-|staging-|prod-"
+sudo docker network ls 2>/dev/null | grep -E "dev-|staging-|prod-"
 
 echo -e "\n=== Secrets Permissions ==="
 find secrets -name "*.txt" -exec ls -l {} \; 2>/dev/null | awk '{print $1, $NF}'

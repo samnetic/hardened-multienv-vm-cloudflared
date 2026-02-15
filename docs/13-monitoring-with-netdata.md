@@ -2,6 +2,14 @@
 
 Real-time monitoring for your VM and Docker containers.
 
+## Security Note (Read This)
+
+Netdata can require elevated access (e.g., `SYS_ADMIN`, Docker socket) to provide deep container/system visibility. For an "extremely secure" setup, prefer:
+
+- A separate monitoring VPS (Grafana/Prometheus/Loki) that your app VPS cannot reach with admin credentials.
+- Lightweight agents on the app VPS with least privilege (see `infra/monitoring-agent` and `docs/17-monitoring-separate-vps.md`).
+- Full monitoring server setup guide: `docs/18-monitoring-server.md`.
+
 ## What You Get
 
 - **System**: CPU, RAM, disk I/O, network, load
@@ -13,18 +21,18 @@ Real-time monitoring for your VM and Docker containers.
 
 ```bash
 # 1. Create config
-cd infra/monitoring
+cd /srv/infrastructure/monitoring
 cp .env.example .env
 nano .env  # Set HOSTNAME
 
 # 2. Start Netdata
-docker compose up -d
+sudo docker compose up -d
 
 # 3. Enable in Caddyfile (uncomment monitoring section)
-nano ../reverse-proxy/Caddyfile
+nano /srv/infrastructure/reverse-proxy/Caddyfile
 
 # 4. Reload Caddy
-docker compose -f ../reverse-proxy/compose.yml restart caddy
+cd /srv/infrastructure/reverse-proxy && sudo docker compose restart caddy
 ```
 
 Access at: `https://monitoring.yourdomain.com`
@@ -69,7 +77,7 @@ In Cloudflare Zero Trust dashboard:
 
 Edit Netdata config:
 ```bash
-docker exec -it netdata bash
+sudo docker exec -it netdata bash
 cd /etc/netdata
 ./edit-config health_alarm_notify.conf
 ```
@@ -99,7 +107,7 @@ Free remote access without exposing ports:
    NETDATA_CLAIM_TOKEN=your-token
    NETDATA_CLAIM_ROOMS=your-room-id
    ```
-4. Restart: `docker compose up -d`
+4. Restart: `sudo docker compose up -d`
 
 ## Resource Usage
 

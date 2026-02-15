@@ -27,6 +27,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="/opt/vm-config/setup.conf"
 
+# sudo helper (wizard should run as sysadmin; root works too)
+SUDO="sudo"
+if [ "${EUID:-0}" -eq 0 ]; then
+  SUDO=""
+fi
+
 # =================================================================
 # Helper Functions
 # =================================================================
@@ -83,6 +89,55 @@ confirm() {
   response=${response:-$default}
 
   [[ "$response" =~ ^[Yy]$ ]]
+}
+
+ensure_docker_access() {
+  if docker info >/dev/null 2>&1; then
+    return 0
+  fi
+  if [ -n "$SUDO" ] && $SUDO docker info >/dev/null 2>&1; then
+    return 0
+  fi
+  print_error "Docker is not accessible for this user."
+  print_info "Run as 'sysadmin' (recommended) or use sudo privileges."
+  print_info "Adding users to the docker group is not recommended (docker group is root-equivalent)."
+  exit 1
+}
+
+run_compose() {
+  local dir="$1"
+  shift
+  if (cd "$dir" && docker compose "$@"); then
+    return 0
+  fi
+  if [ -n "$SUDO" ] && (cd "$dir" && $SUDO docker compose "$@"); then
+    return 0
+  fi
+  return 1
+}
+
+create_app_dir() {
+  local app_dir="$1"
+  $SUDO mkdir -p "$app_dir"
+  # Keep app deployments owned by sysadmin (humans). CI deploys via a root-owned wrapper.
+  if id sysadmin >/dev/null 2>&1; then
+    $SUDO chown -R sysadmin:sysadmin "$app_dir" 2>/dev/null || true
+  fi
+  $SUDO chmod 755 "$app_dir" 2>/dev/null || true
+}
+
+prompt_image() {
+  local default_image="$1"
+  local label="$2"
+
+  echo ""
+  echo "Docker image for ${label}:"
+  read -rp "Image [${default_image}]: " image
+  image="${image:-$default_image}"
+  if [[ "$image" =~ :latest$ ]]; then
+    print_warning "Using ':latest' is non-deterministic. Prefer pinning a version tag for reproducible deploys."
+  fi
+  echo "$image"
 }
 
 show_menu() {
@@ -166,7 +221,7 @@ init_infrastructure() {
   echo "  /srv/infrastructure/    - Reverse proxy, monitoring (git tracked)"
   echo "  /srv/apps/              - Your applications (dev/staging/prod)"
   echo "  /srv/static/            - Static files (images, assets)"
-  echo "  /var/secrets/           - Encrypted secrets (NOT in git)"
+  echo "  /var/secrets/           - Secrets (NOT in git)"
   echo ""
 
   if [ -d "/srv/infrastructure" ]; then
@@ -180,17 +235,56 @@ init_infrastructure() {
   if confirm "Initialize /srv infrastructure now?" "y"; then
     print_step "Creating directory structure..."
 
-    # Use the init-infrastructure.sh script if it exists
-    if [ -f "$SCRIPT_DIR/init-infrastructure.sh" ]; then
-      print_command "./scripts/init-infrastructure.sh"
-      "$SCRIPT_DIR/init-infrastructure.sh"
+    local infra_root="/srv/infrastructure"
+
+    # Base directories
+    $SUDO mkdir -p "$infra_root" /srv/static
+    $SUDO mkdir -p /var/secrets/{dev,staging,production}
+
+    # Permissions
+    $SUDO chown -R sysadmin:sysadmin "$infra_root" /srv/static 2>/dev/null || true
+    $SUDO chmod 755 "$infra_root" /srv/static 2>/dev/null || true
+
+    local secrets_group="hosting-secrets"
+    if getent group "$secrets_group" >/dev/null 2>&1; then
+      $SUDO chown -R root:"$secrets_group" /var/secrets
+      $SUDO chmod 750 /var/secrets
+      $SUDO find /var/secrets -type d -exec chmod 750 {} \;
+      $SUDO find /var/secrets -type f -name '*.txt' -exec chmod 640 {} \; 2>/dev/null || true
     else
-      # Fallback to manual creation
-      sudo mkdir -p /srv/{infrastructure,apps/{dev,staging,production},static}
-      sudo mkdir -p /var/secrets/{dev,staging,production}
-      sudo chown -R "$USER:$USER" /srv /var/secrets
-      sudo chmod 700 /var/secrets
-      sudo find /var/secrets -type d -exec chmod 700 {} \;
+      print_warning "Group '$secrets_group' not found; securing /var/secrets as root-only (700)"
+      $SUDO chown -R root:root /var/secrets
+      $SUDO chmod 700 /var/secrets
+      $SUDO find /var/secrets -type d -exec chmod 700 {} \;
+    fi
+
+    # Copy templates (idempotent: only if reverse-proxy is missing)
+    if [ ! -f "${infra_root}/reverse-proxy/compose.yml" ]; then
+      print_step "Copying infrastructure templates..."
+      $SUDO cp -r "$PROJECT_ROOT/infra/"* "$infra_root/"
+      $SUDO chown -R sysadmin:sysadmin "$infra_root" 2>/dev/null || true
+      print_success "Templates copied to $infra_root"
+    else
+      print_info "Infrastructure templates already present (skipping copy)"
+    fi
+
+    # Start reverse proxy (Caddy)
+    if [ -f "${infra_root}/reverse-proxy/compose.yml" ]; then
+      ensure_docker_access
+      print_step "Ensuring Docker networks exist..."
+      if [ -x "$PROJECT_ROOT/scripts/create-networks.sh" ]; then
+        $SUDO "$PROJECT_ROOT/scripts/create-networks.sh" || print_warning "Network creation reported an error (continuing)"
+      else
+        print_warning "Missing script: $PROJECT_ROOT/scripts/create-networks.sh"
+      fi
+      print_step "Starting reverse proxy..."
+      if run_compose "${infra_root}/reverse-proxy" up -d; then
+        print_success "Reverse proxy started"
+      else
+        print_error "Failed to start reverse proxy (sudo docker compose up -d)"
+      fi
+    else
+      print_warning "Reverse proxy compose.yml not found at ${infra_root}/reverse-proxy/compose.yml"
     fi
 
     print_success "Infrastructure initialized!"
@@ -267,21 +361,26 @@ deploy_n8n() {
   read -rp "Subdomain for n8n (e.g., 'n8n' for n8n.${DOMAIN}): " subdomain
   subdomain=${subdomain:-n8n}
 
+  ensure_docker_access
+
+  local image
+  image="$(prompt_image "n8nio/n8n:latest" "n8n")"
+
   print_step "Creating n8n configuration..."
 
   # Create app directory
   local app_dir="/srv/apps/production/n8n"
-  mkdir -p "$app_dir"
+  create_app_dir "$app_dir"
 
   # Create compose.yml
-  cat > "$app_dir/compose.yml" << EOF
+  $SUDO tee "$app_dir/compose.yml" >/dev/null << EOF
 services:
   n8n:
-    image: n8nio/n8n:latest
+    image: ${image}
     container_name: n8n-production
     restart: unless-stopped
-    ports:
-      - "5678:5678"
+    init: true
+    stop_grace_period: 30s
     environment:
       - N8N_HOST=${subdomain}.${DOMAIN}
       - N8N_PORT=5678
@@ -296,13 +395,18 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    cap_add:
-      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp:size=64M,mode=1777
+    pids_limit: 200
     deploy:
       resources:
         limits:
           cpus: '1.0'
           memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
 
 volumes:
   n8n_data:
@@ -315,8 +419,10 @@ EOF
   print_success "Configuration created"
 
   print_step "Starting n8n..."
-  cd "$app_dir"
-  docker compose up -d
+  if ! run_compose "$app_dir" up -d; then
+    print_error "Failed to start n8n (sudo docker compose up -d)"
+    return 1
+  fi
 
   print_success "n8n deployed!"
   echo ""
@@ -353,19 +459,24 @@ deploy_nocodb() {
   read -rp "Subdomain for NocoDB (e.g., 'nocodb' for nocodb.${DOMAIN}): " subdomain
   subdomain=${subdomain:-nocodb}
 
+  ensure_docker_access
+
+  local image
+  image="$(prompt_image "nocodb/nocodb:latest" "NocoDB")"
+
   print_step "Creating NocoDB configuration..."
 
   local app_dir="/srv/apps/production/nocodb"
-  mkdir -p "$app_dir"
+  create_app_dir "$app_dir"
 
-  cat > "$app_dir/compose.yml" << EOF
+  $SUDO tee "$app_dir/compose.yml" >/dev/null << EOF
 services:
   nocodb:
-    image: nocodb/nocodb:latest
+    image: ${image}
     container_name: nocodb-production
     restart: unless-stopped
-    ports:
-      - "8080:8080"
+    init: true
+    stop_grace_period: 30s
     environment:
       - NC_PUBLIC_URL=https://${subdomain}.${DOMAIN}
     volumes:
@@ -376,11 +487,18 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=64M,mode=1777
+    pids_limit: 200
     deploy:
       resources:
         limits:
           cpus: '1.0'
           memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
 
 volumes:
   nocodb_data:
@@ -393,8 +511,10 @@ EOF
   print_success "Configuration created"
 
   print_step "Starting NocoDB..."
-  cd "$app_dir"
-  docker compose up -d
+  if ! run_compose "$app_dir" up -d; then
+    print_error "Failed to start NocoDB (sudo docker compose up -d)"
+    return 1
+  fi
 
   print_success "NocoDB deployed!"
   echo ""
@@ -433,7 +553,7 @@ deploy_plausible() {
   print_command "git clone https://github.com/plausible/hosting /srv/apps/production/plausible"
   print_command "cd /srv/apps/production/plausible"
   print_command "vim docker-compose.yml  # Configure your domain"
-  print_command "docker compose up -d"
+  print_command "sudo docker compose up -d"
   echo ""
   print_info "See: https://plausible.io/docs/self-hosting"
   echo ""
@@ -461,19 +581,24 @@ deploy_uptime_kuma() {
   read -rp "Subdomain for Uptime Kuma (e.g., 'status' for status.${DOMAIN}): " subdomain
   subdomain=${subdomain:-status}
 
+  ensure_docker_access
+
+  local image
+  image="$(prompt_image "louislam/uptime-kuma:latest" "Uptime Kuma")"
+
   print_step "Creating Uptime Kuma configuration..."
 
   local app_dir="/srv/apps/production/uptime-kuma"
-  mkdir -p "$app_dir"
+  create_app_dir "$app_dir"
 
-  cat > "$app_dir/compose.yml" << EOF
+  $SUDO tee "$app_dir/compose.yml" >/dev/null << EOF
 services:
   uptime-kuma:
-    image: louislam/uptime-kuma:latest
+    image: ${image}
     container_name: uptime-kuma-production
     restart: unless-stopped
-    ports:
-      - "3001:3001"
+    init: true
+    stop_grace_period: 30s
     volumes:
       - uptime_kuma_data:/app/data
     networks:
@@ -482,11 +607,18 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=64M,mode=1777
+    pids_limit: 200
     deploy:
       resources:
         limits:
           cpus: '0.5'
           memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
 
 volumes:
   uptime_kuma_data:
@@ -499,8 +631,10 @@ EOF
   print_success "Configuration created"
 
   print_step "Starting Uptime Kuma..."
-  cd "$app_dir"
-  docker compose up -d
+  if ! run_compose "$app_dir" up -d; then
+    print_error "Failed to start Uptime Kuma (sudo docker compose up -d)"
+    return 1
+  fi
 
   print_success "Uptime Kuma deployed!"
   echo ""
@@ -521,15 +655,15 @@ deploy_custom_app() {
   read -rp "Internal port (e.g., 3000): " port
 
   local app_dir="/srv/apps/production/${app_name}"
-  mkdir -p "$app_dir"
+  create_app_dir "$app_dir"
 
   print_info "Created directory: $app_dir"
   echo ""
   print_info "Next steps:"
-  echo "  1. Place your docker-compose.yml in $app_dir"
+  echo "  1. Place your compose.yml in $app_dir"
   echo "  2. Ensure container name matches: ${container_name}"
   echo "  3. Ensure it connects to 'prod-web' network"
-  echo "  4. Start with: docker compose up -d"
+  echo "  4. Start with: sudo docker compose up -d"
   echo ""
 
   pause
@@ -578,7 +712,7 @@ configure_caddy() {
   print_step "Adding route to Caddyfile..."
 
   # Add route to Caddyfile
-  cat >> "$caddyfile" << EOF
+  $SUDO tee -a "$caddyfile" >/dev/null << EOF
 
 # ${subdomain} - Added by wizard $(date)
 http://${subdomain}.${DOMAIN} {
@@ -594,9 +728,9 @@ EOF
   # Reload Caddy
   print_step "Reloading Caddy..."
   if [ -f "$SCRIPT_DIR/update-caddy.sh" ]; then
-    "$SCRIPT_DIR/update-caddy.sh"
+    $SUDO "$SCRIPT_DIR/update-caddy.sh"
   else
-    docker compose -f /srv/infrastructure/reverse-proxy/compose.yml restart caddy
+    $SUDO docker compose -f /srv/infrastructure/reverse-proxy/compose.yml restart caddy
   fi
 
   print_success "Caddy reloaded!"
@@ -640,35 +774,40 @@ configure_dns() {
 setup_monitoring() {
   print_header "Optional: Set Up Monitoring"
 
-  echo "Would you like to deploy monitoring dashboards?"
+  echo "For an extremely secure setup, prefer a separate monitoring VPS."
   echo ""
-  echo -e "${CYAN}Available monitoring tools:${NC}"
-  echo "  • Portainer - Docker management UI"
-  echo "  • Grafana - Metrics visualization"
-  echo "  • Netdata - Real-time system monitoring"
+  echo "Why separate?"
+  echo "  • Your app VPS should not hold credentials to its own monitoring/control plane"
+  echo "  • Many monitoring agents require privileged access (Docker socket, SYS_ADMIN)"
+  echo ""
+  echo -e "${CYAN}Recommended monitoring options:${NC}"
+  echo "  1) Separate monitoring VPS (Recommended)"
+  echo "     - Run Grafana/Prometheus/Loki there"
+  echo "     - Use lightweight agents here (node_exporter, promtail)"
+  echo ""
+  echo "  2) Local Netdata (Optional)"
+  echo "     - Quick visibility but requires elevated access on this VPS"
+  echo "     - Must be protected with Cloudflare Access"
   echo ""
 
-  if ! confirm "Set up monitoring now?"; then
-    print_info "Skipped monitoring setup"
+  if ! confirm "Review monitoring options now?"; then
+    print_info "Skipped monitoring guidance"
     echo ""
-    print_info "You can set up monitoring later using:"
-    print_command "./scripts/monitoring/deploy-portainer.sh"
-    print_command "./scripts/monitoring/deploy-grafana.sh"
+    print_info "Docs:"
+    print_command "cat docs/13-monitoring-with-netdata.md"
+    print_command "cat docs/14-cloudflare-zero-trust.md"
     echo ""
     return 0
   fi
 
-  # Deploy Portainer
-  if confirm "Deploy Portainer (Docker UI)?" "y"; then
-    print_step "Deploying Portainer..."
-    # Provide instructions
-    echo ""
-    print_command "docker volume create portainer_data"
-    print_command "docker run -d -p 9000:9000 --name portainer --restart always -v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data portainer/portainer-ce"
-    echo ""
-    print_info "Then add Caddy route for portainer.${DOMAIN}"
-    echo ""
-  fi
+  echo ""
+  print_info "If you choose local Netdata, follow:"
+  print_command "cd /srv/infrastructure/monitoring && sudo docker compose up -d"
+  print_command "nano /srv/infrastructure/reverse-proxy/Caddyfile   # enable monitoring route"
+  print_command "./scripts/update-caddy.sh"
+  echo ""
+  print_warning "Before exposing monitoring, add Cloudflare Access policy for monitoring.${DOMAIN}"
+  echo ""
 
   pause
 }
@@ -699,7 +838,7 @@ show_completion() {
   print_command "crontab -e  # Add backup cron jobs"
   echo ""
   echo "5. ${BOLD}Monitor Your System${NC}"
-  echo "   Set up Portainer, Grafana, or Netdata"
+  echo "   Prefer a separate monitoring VPS (recommended) or use Netdata locally with Cloudflare Access"
   echo ""
   echo -e "${CYAN}Useful Commands:${NC}"
   echo ""

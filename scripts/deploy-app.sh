@@ -23,6 +23,21 @@ if [ ! -w "$(dirname "$LOG_FILE")" ] && [ ! -w "$LOG_FILE" ] 2>/dev/null; then
   mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
 fi
 
+# Prefer a security-first model: humans are not in the docker group.
+# If docker isn't directly accessible, fall back to sudo.
+DOCKER=(docker)
+if ! command -v docker >/dev/null 2>&1; then
+  echo -e "${RED}✗ Docker is not installed${NC}" >&2
+  exit 1
+fi
+if ! docker info >/dev/null 2>&1; then
+  DOCKER=(sudo docker)
+fi
+
+compose() {
+  "${DOCKER[@]}" compose "$@"
+}
+
 # =================================================================
 # Functions
 # =================================================================
@@ -63,9 +78,9 @@ validate_docker_config() {
   echo "Validating Docker configuration..."
 
   # Check if compose file is valid YAML
-  if ! docker compose config > /dev/null 2>&1; then
+  if ! compose config > /dev/null 2>&1; then
     echo -e "${RED}✗ Invalid compose.yml syntax${NC}"
-    docker compose config 2>&1 | head -5
+    compose config 2>&1 | head -5
     exit 1
   fi
   echo -e "${GREEN}  ✓ Compose file syntax valid${NC}"
@@ -155,7 +170,7 @@ log_message "DEPLOY_START | APP: $APP_NAME | USER: $(whoami)"
 
 # Pull latest images (if not building)
 echo "Pulling latest images..."
-if docker compose pull 2>/dev/null; then
+if compose pull 2>/dev/null; then
   echo -e "${GREEN}✓ Images pulled${NC}"
 else
   echo -e "${YELLOW}⚠️  Pull failed or building locally${NC}"
@@ -165,14 +180,14 @@ fi
 if [ -f "Dockerfile" ]; then
   echo ""
   echo "Building image..."
-  docker compose build --pull
+  compose build --pull
   echo -e "${GREEN}✓ Build complete${NC}"
 fi
 
 # Deploy containers
 echo ""
 echo "Deploying containers..."
-docker compose up -d --remove-orphans
+compose up -d --remove-orphans
 
 # Wait for healthiness
 echo ""
@@ -186,11 +201,11 @@ HEALTHY=false
 
 for i in $(seq 1 $MAX_RETRIES); do
   # Check if any containers are unhealthy or exited
-  if docker compose ps | grep -qE "unhealthy|exited"; then
+  if compose ps | grep -qE "unhealthy|exited"; then
     echo "  Attempt $i/$MAX_RETRIES: Some containers not healthy yet..."
     if [ "$i" -eq "$MAX_RETRIES" ]; then
       echo -e "${RED}✗ Containers unhealthy after 30s${NC}"
-      docker compose ps
+      compose ps
       log_message "DEPLOY_FAILED | APP: $APP_NAME | REASON: unhealthy"
       exit 1
     fi
@@ -211,12 +226,12 @@ fi
 # Show status
 echo ""
 echo "Container status:"
-docker compose ps
+compose ps
 
 # Show recent logs
 echo ""
 echo "Recent logs (last 20 lines):"
-docker compose logs --tail=20
+compose logs --tail=20
 
 # Log successful deployment
 log_message "DEPLOY_SUCCESS | APP: $APP_NAME"
@@ -226,8 +241,8 @@ print_header "Deployment Complete!"
 echo -e "${GREEN}✓ $APP_NAME deployed successfully${NC}"
 echo ""
 echo "Useful commands:"
-echo "  docker compose ps             - View status"
-echo "  docker compose logs -f        - Follow logs"
-echo "  docker compose restart        - Restart app"
-echo "  docker compose down           - Stop app"
+echo "  sudo docker compose ps             - View status"
+echo "  sudo docker compose logs -f        - Follow logs"
+echo "  sudo docker compose restart        - Restart app"
+echo "  sudo docker compose down           - Stop app"
 echo ""

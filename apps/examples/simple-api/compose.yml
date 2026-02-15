@@ -1,19 +1,18 @@
 # =================================================================
 # Simple API Example - Node.js Express
 # =================================================================
-# Demonstrates building custom Docker image with health checks
+# Demonstrates a GitOps-friendly pre-built image deploy, with an optional local build override
 # =================================================================
 
 services:
   app:
-    # Build from local Dockerfile
-    build:
-      context: .
-      dockerfile: Dockerfile
-
-    image: simple-api:${ENVIRONMENT}
+    # Security-first default: deploy a pre-built image (GitOps-friendly).
+    # For local/VM-side builds and loopback port publishing, use compose.local.yml.
+    image: ${IMAGE:-ghcr.io/your-org/simple-api:1.0.0}
     container_name: app-${ENVIRONMENT}
     restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
 
     # =================================================================
     # Security Hardening (2025 Standards)
@@ -27,7 +26,10 @@ services:
     # Read-only filesystem (Node.js app doesn't write files)
     read_only: true
     tmpfs:
-      - /tmp  # Writable temp space
+      - /tmp:size=64M,mode=1777  # Writable temp space
+
+    # Fork-bomb protection
+    pids_limit: 100
 
     # =================================================================
     # Resource Limits
@@ -51,6 +53,13 @@ services:
       retries: 3
       start_period: 20s
 
+    # Logging (extra defense-in-depth; VM config already sets daemon-wide rotation)
+    logging:
+      driver: "local"
+      options:
+        max-size: "20m"
+        max-file: "5"
+
     # =================================================================
     # Environment Variables
     # =================================================================
@@ -66,9 +75,8 @@ services:
     # =================================================================
     # Networks
     # =================================================================
-    # NOTE: Update the network name to match the one defined below
     networks:
-      - staging-web  # <-- Change this to match your environment
+      - ${DOCKER_NETWORK:-staging-web}
 
     # =================================================================
     # Labels
@@ -81,13 +89,13 @@ services:
 # =================================================================
 # Networks (External - created via scripts/create-networks.sh)
 # =================================================================
-# NOTE: Update the network name below to match your environment.
-# Docker Compose doesn't support variable interpolation in network keys.
-#
-# For dev:        use "dev-web"
-# For staging:    use "staging-web"
-# For production: use "prod-web"
+# Compose doesn't support variable interpolation in network keys, so we define
+# dev/staging/prod keys and choose the one to attach via DOCKER_NETWORK.
 # =================================================================
 networks:
-  staging-web:  # <-- Change this to match your environment
+  dev-web:
+    external: true
+  staging-web:
+    external: true
+  prod-web:
     external: true

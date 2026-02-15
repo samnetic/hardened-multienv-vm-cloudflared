@@ -60,16 +60,13 @@ sudo ufw default allow outgoing
 
 ### After Cloudflare Tunnel Setup
 
-**Lock down to Cloudflare IPs only:**
+With Cloudflare Tunnel, you generally do **not** need any inbound firewall allows (HTTP/HTTPS is delivered over the tunnel).
+
+**Recommended (zero inbound ports):**
 ```bash
-# Download Cloudflare IP ranges
-curl -s https://www.cloudflare.com/ips-v4 -o /tmp/cf_ips_v4
-
-# Allow only Cloudflare to web ports
-while read ip; do sudo ufw allow from $ip to any port 80,443 proto tcp; done < /tmp/cf_ips_v4
-
-# Remove public SSH access
+# Remove direct SSH access (once tunnel SSH is verified)
 sudo ufw delete allow OpenSSH
+sudo ufw delete limit OpenSSH
 ```
 
 ### Verify
@@ -77,8 +74,21 @@ sudo ufw delete allow OpenSSH
 ```bash
 sudo ufw status verbose
 # Port 22 should NOT be listed
-# Only Cloudflare IPs should access 80/443
+# No inbound ALLOW rules are needed for Tunnel-only setups
 ```
+
+---
+
+## Tunnel-Only Origin Enforcement (Caddy)
+
+This blueprint enforces “tunnel-only” origin access with defense in depth:
+
+- **Ports:** UFW closes 80/443 (and optionally 22), so the VM does not accept inbound traffic directly.
+- **Bind:** The reverse proxy publishes only to `127.0.0.1:80` (cloudflared connects locally).
+- **Reject bypass:** Caddy denies any request not coming from the host NAT gateway of `hosting-caddy-origin` (pinned to `10.250.0.1`) or loopback. This prevents container-to-container bypasses if an app container is compromised.
+- **Idempotency:** `scripts/finalize-tunnel.sh` writes `/etc/hosting-blueprint/tunnel-only.enabled`. Re-running `scripts/setup-vm.sh` will detect this and will not re-open inbound ports.
+
+If you get unexpected `403` responses from Caddy, see `docs/05-troubleshooting.md`.
 
 ---
 
@@ -125,14 +135,31 @@ USER nodejs
 - ✅ sudo access
 - ✅ System updates
 - ✅ Firewall configuration
-- ❌ No app deployments
+- ✅ Emergency/manual deployments (via sudo)
+
+By default, `sysadmin` sudo requires a local password (SSH remains key-only).
 
 ### appmgr (Application Manager)
-- ✅ Docker access
-- ✅ App deployments
-- ✅ Log viewing
-- ❌ No sudo
-- ❌ No system changes
+- ✅ CI/CD deployments (restricted)
+- ✅ `hosting sync|deploy|status` only (no shell)
+- ❌ Docker group access
+- ❌ Interactive SSH shell
+- ❌ System changes
+
+### Important: Docker Group == Root
+
+On a Docker host, membership in the `docker` group is effectively **root-equivalent** because Docker can mount the host filesystem and start privileged containers.
+
+This blueprint avoids giving `appmgr` docker access. Instead, `appmgr` is restricted via `sshd ForceCommand` and a sudo allowlist to a root-owned deploy tool.
+
+Treat `appmgr` and its SSH key as **high privilege** (it can trigger deployments).
+
+Recommended mitigations:
+
+- Use a dedicated CI/CD deploy key (don’t reuse your personal key).
+- Protect SSH with Cloudflare Access + Service Tokens (machine-to-machine).
+- Restrict CI with a forced command (enabled by default in this blueprint).
+- Prefer a separate VPS for monitoring/control-plane tools (Grafana admin, etc.).
 
 ---
 
@@ -196,13 +223,15 @@ We use **file-based secrets** instead of environment variables. See [06-secrets-
 ```yaml
 environment:
   - DATABASE_PASSWORD_FILE=/run/secrets/db_password
+group_add:
+  - "1999" # hosting-secrets (so non-root containers can read /var/secrets/*/*.txt)
 volumes:
-  - ../../secrets/${ENVIRONMENT}/db_password.txt:/run/secrets/db_password:ro
+  - /var/secrets/${ENVIRONMENT}/db_password.txt:/run/secrets/db_password:ro
 ```
 
 ### Rules
 
-- **Never** commit secrets to git (gitignored by default)
+- **Never** commit secrets to git (use `/var/secrets`)
 - **Never** use same secrets across environments
 - **Always** use file-based pattern (not env vars)
 - **Rotate** secrets quarterly or when team members leave
@@ -239,11 +268,11 @@ sudo journalctl -u sshd --since "1 day ago"
 
 - [ ] SSH keys only (no password auth)
 - [ ] fail2ban enabled
-- [ ] UFW locked to Cloudflare IPs
+- [ ] UFW inbound closed (tunnel-only)
 - [ ] Port 22 closed to public
 - [ ] All containers use `no-new-privileges`
 - [ ] Resource limits on all containers
-- [ ] Secrets in .env files (gitignored)
+- [ ] Secrets stored as files in `/var/secrets` (not in git)
 - [ ] Separate secrets for staging/production
 - [ ] Health checks on all apps
 - [ ] Caddy security headers enabled
@@ -309,7 +338,7 @@ sudo ufw delete allow OpenSSH
 sudo journalctl -u sshd --since "1 day ago" | grep "Failed"
 
 # Container restarts (possible attacks)
-docker ps --format "table {{.Names}}\t{{.Status}}"
+sudo docker ps --format "table {{.Names}}\t{{.Status}}"
 
 # Firewall hits
 sudo tail /var/log/ufw.log
@@ -348,7 +377,7 @@ sudo fail2ban-client status
    - Update .env files
 
 4. **Review:**
-   - Check docker logs
+   - Check sudo docker logs
    - Review fail2ban
    - Audit user actions
 

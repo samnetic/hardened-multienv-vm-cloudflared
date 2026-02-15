@@ -309,7 +309,7 @@ Type: **yes**
 Once connected to your VM:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm/main/bootstrap.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/bootstrap.sh | sudo bash
 ```
 
 **What happens:**
@@ -326,6 +326,7 @@ curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm/main/
    - You'll be prompted for:
      - Domain name (e.g., `yourdomain.com`)
      - SSH public keys (paste from Step 6)
+     - Sysadmin sudo mode (password required recommended vs passwordless)
      - Timezone (default: UTC)
      - Cloudflare Tunnel setup? (yes/no)
 
@@ -352,12 +353,20 @@ Domain name (e.g., yourdomain.com): [Enter your domain]
 
 SSH public key for sysadmin user: [Paste from Step 6]
 
-SSH public key for appmgr user (press Enter to use same): [Press Enter or paste different key]
+Appmgr SSH key option [1]: [Press Enter]
+Appmgr SSH Key: [Paste a dedicated deploy key]  # or choose reuse/skip
+
+Require password for sysadmin sudo? (recommended) [Y/n]: [Press Enter]
 
 Timezone (default: UTC): [Press Enter or type timezone]
 
 Set up Cloudflare Tunnel now? (yes/no): yes
 ```
+
+After the core setup, you'll also be asked about optional hardening (you can skip and run later):
+- Enable SOPS + age for encrypted `.env.*.enc` deployments
+- Install host security tools (AIDE, Lynis, rkhunter, debsums)
+- Harden `/tmp` (tmpfs + `noexec,nosuid,nodev`)
 
 ### 7.4 After Setup Completes
 
@@ -387,24 +396,18 @@ After tunnel is set up, configure your **local machine** to SSH via tunnel.
 
 ### 8.1 Install cloudflared
 
-**macOS:**
+Recommended (installs cloudflared + configures `~/.ssh/config`):
+
 ```bash
-brew install cloudflared
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com sysadmin
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.yourdomain.com appmgr
 ```
 
-**Ubuntu/Debian:**
-```bash
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
-sudo dpkg -i cloudflared.deb
-rm cloudflared.deb
-```
+Manual install (if you prefer):
 
-**Other Linux:**
-```bash
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
-chmod +x cloudflared
-sudo mv cloudflared /usr/local/bin/
-```
+- macOS: `brew install cloudflared`
+- Debian/Ubuntu: install via the official repo at `https://pkg.cloudflare.com/cloudflared`
+- Other Linux: download a binary from Cloudflare’s official releases (verify source)
 
 ### 8.2 Configure SSH
 
@@ -506,7 +509,7 @@ sudo iptables -L -n | grep 22
 **Get help:**
 1. Check logs: `/opt/hosting-blueprint/setup.log`
 2. Run with debug: `bash -x /opt/hosting-blueprint/setup.sh`
-3. Create issue: [GitHub Issues](https://github.com/samnetic/hardened-multienv-vm/issues)
+3. Create issue: [GitHub Issues](https://github.com/samnetic/hardened-multienv-vm-cloudflared/issues)
 
 ---
 

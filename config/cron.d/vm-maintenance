@@ -14,11 +14,10 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 # CRITICAL: Security & Updates
 # ===========================================
 
-# Run unattended upgrades check (daily at 2:00 AM)
-0 2 * * * root /usr/bin/unattended-upgrade -d >> /var/log/unattended-upgrades/unattended-upgrades.log 2>&1
-
-# Update package lists (daily at 1:30 AM)
-30 1 * * * root /usr/bin/apt-get update -qq
+# Automatic updates:
+# - This blueprint enables unattended-upgrades + apt periodic settings.
+# - Ubuntu also runs `apt-daily` and `apt-daily-upgrade` via systemd timers.
+# If you disable those timers and want explicit scheduling, add cron jobs here.
 
 # ===========================================
 # CRITICAL: Log Management
@@ -51,6 +50,10 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 # Note: setup-vm.sh copies this script to /opt/scripts/check-disk-usage.sh
 0 6 * * * root test -x /opt/scripts/check-disk-usage.sh && /opt/scripts/check-disk-usage.sh 2>&1 | logger -t disk-check
 
+# Docker port exposure check - alert if any container publishes ports publicly (daily 6:10 AM)
+# Note: setup-vm.sh copies this script to /opt/scripts/check-docker-exposed-ports.sh
+10 6 * * * root test -x /opt/scripts/check-docker-exposed-ports.sh && /opt/scripts/check-docker-exposed-ports.sh >/dev/null 2>&1
+
 # fail2ban status check (daily 7:00 AM)
 0 7 * * * root /usr/bin/fail2ban-client status >> /var/log/fail2ban-daily.log 2>&1
 
@@ -66,7 +69,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 # 0 1 * * 0 root /usr/bin/aide --check > /var/log/aide/aide-weekly.log 2>&1
 
 # Check for unauthorized SUID/SGID files (weekly Sunday 2:00 AM)
-0 2 * * 0 root find / -type f \( -perm -4000 -o -perm -2000 \) -exec ls -la {} \; 2>/dev/null | logger -t suid-check
+# NOTE: Full-disk scans can be IO-heavy on small VPS. Prefer AIDE if enabled.
+# 0 2 * * 0 root find / -type f \( -perm -4000 -o -perm -2000 \) -exec ls -la {} \; 2>/dev/null | logger -t suid-check
 
 # ===========================================
 # OPTIONAL: Backups

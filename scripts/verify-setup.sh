@@ -26,6 +26,16 @@ NC='\033[0m'
 SYSADMIN_USER="sysadmin"
 APPMGR_USER="appmgr"
 CURRENT_USER="$(whoami)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Prefer a security-first model: humans are not in the docker group.
+# If docker isn't directly accessible, fall back to sudo.
+DOCKER=(docker)
+if command -v docker >/dev/null 2>&1; then
+  if ! docker info >/dev/null 2>&1; then
+    DOCKER=(sudo docker)
+  fi
+fi
 
 # =================================================================
 # Helper Functions
@@ -102,9 +112,28 @@ verify_users_created() {
     print_success "User '$APPMGR_USER' exists"
 
     if groups "$APPMGR_USER" | grep -q docker; then
-      print_success "User '$APPMGR_USER' has docker access"
+      print_warning "User '$APPMGR_USER' is in docker group (not recommended; docker group is root-equivalent)"
     else
-      print_warning "User '$APPMGR_USER' not in docker group (will be added when Docker installs)"
+      print_success "User '$APPMGR_USER' is NOT in docker group (security-first)"
+    fi
+
+    # Verify CI restriction tooling is installed (best-effort).
+    if [ -x /usr/local/sbin/hosting-ci-ssh ] && [ -x /usr/local/sbin/hosting-deploy ]; then
+      print_success "CI deploy toolchain installed (/usr/local/sbin/hosting-*)"
+    else
+      print_warning "CI deploy toolchain not found (expected /usr/local/sbin/hosting-ci-ssh and /usr/local/sbin/hosting-deploy)"
+    fi
+
+    if [ -f /etc/ssh/sshd_config.d/99-appmgr-ci.conf ] && grep -q "ForceCommand /usr/local/sbin/hosting-ci-ssh" /etc/ssh/sshd_config.d/99-appmgr-ci.conf 2>/dev/null; then
+      print_success "SSHD Match block installed for $APPMGR_USER (ForceCommand enabled)"
+    else
+      print_warning "SSHD Match block missing for $APPMGR_USER (expected /etc/ssh/sshd_config.d/99-appmgr-ci.conf)"
+    fi
+
+    if [ -f /etc/sudoers.d/appmgr-hosting-deploy ] && sudo visudo -cf /etc/sudoers.d/appmgr-hosting-deploy >/dev/null 2>&1; then
+      print_success "Sudoers allowlist installed for $APPMGR_USER (/etc/sudoers.d/appmgr-hosting-deploy)"
+    else
+      print_warning "Sudoers allowlist missing or invalid (expected /etc/sudoers.d/appmgr-hosting-deploy)"
     fi
   else
     print_error "User '$APPMGR_USER' not found"
@@ -215,15 +244,22 @@ verify_security_hardening() {
 
   # Check Docker
   if command -v docker &> /dev/null; then
-    local docker_version=$(docker --version | awk '{print $3}' | tr -d ',')
+    local docker_version=$("${DOCKER[@]}" --version | awk '{print $3}' | tr -d ',')
     print_success "Docker is installed ($docker_version)"
 
     # Check docker compose
-    if docker compose version &>/dev/null; then
-      local compose_version=$(docker compose version | awk '{print $4}')
+    if "${DOCKER[@]}" compose version &>/dev/null; then
+      local compose_version=$("${DOCKER[@]}" compose version | awk '{print $4}')
       print_success "Docker Compose is installed ($compose_version)"
     else
       print_warning "Docker Compose not found"
+    fi
+
+    # Check for dangerous port publishing (0.0.0.0/::)
+    if [ -x "${SCRIPT_DIR}/security/check-docker-exposed-ports.sh" ]; then
+      if ! "${SCRIPT_DIR}/security/check-docker-exposed-ports.sh"; then
+        all_good=false
+      fi
     fi
   else
     print_error "Docker is not installed"
@@ -244,11 +280,11 @@ verify_security_hardening() {
 verify_docker_networks() {
   print_header "Step 4: Verify Docker Networks"
 
-  local expected_networks=("dev-network" "staging-network" "production-network")
+  local expected_networks=("hosting-caddy-origin" "dev-web" "dev-backend" "staging-web" "staging-backend" "prod-web" "prod-backend" "monitoring")
   local all_good=true
 
   for network in "${expected_networks[@]}"; do
-    if docker network inspect "$network" &>/dev/null; then
+    if "${DOCKER[@]}" network inspect "$network" &>/dev/null; then
       print_success "Network '$network' exists"
     else
       print_warning "Network '$network' not found"
@@ -258,7 +294,7 @@ verify_docker_networks() {
 
   if [ "$all_good" = false ]; then
     echo ""
-    print_info "Create networks with: ./scripts/create-networks.sh"
+    print_info "Create networks with: sudo ./scripts/create-networks.sh"
   fi
 
   echo ""
@@ -269,17 +305,22 @@ verify_services() {
   print_header "Step 5: Verify Services"
 
   # Check Caddy reverse proxy
-  if docker ps | grep -q caddy; then
+  if "${DOCKER[@]}" ps | grep -q caddy; then
     print_success "Caddy reverse proxy is running"
-    local caddy_status=$(docker ps --filter "name=caddy" --format "{{.Status}}")
+    local caddy_status=$("${DOCKER[@]}" ps --filter "name=caddy" --format "{{.Status}}")
     echo "   Status: $caddy_status"
   else
     print_warning "Caddy reverse proxy not running"
-    print_info "Start with: cd infra/reverse-proxy && docker compose up -d"
+    if [ -d "/srv/infrastructure/reverse-proxy" ]; then
+      print_info "Start with: cd /srv/infrastructure/reverse-proxy && sudo docker compose up -d"
+    else
+      print_info "Start with: cd infra/reverse-proxy && sudo docker compose up -d"
+      print_info "(Recommended: initialize /srv/infrastructure first)"
+    fi
   fi
 
   # Check Cloudflared tunnel
-  if systemctl is-active --quiet cloudflared 2>/dev/null || docker ps | grep -q cloudflared; then
+  if systemctl is-active --quiet cloudflared 2>/dev/null || "${DOCKER[@]}" ps | grep -q cloudflared; then
     print_success "Cloudflare Tunnel is running"
   else
     print_info "Cloudflare Tunnel not detected (optional)"
@@ -309,7 +350,7 @@ verify_system_resources() {
     print_success "Disk usage: ${disk_usage}% (${disk_avail} available)"
   else
     print_warning "Disk usage: ${disk_usage}% (${disk_avail} available)"
-    print_info "Consider cleanup: docker system prune -a"
+    print_info "Consider cleanup: sudo docker system prune -a"
   fi
 
   # Check memory
@@ -363,11 +404,29 @@ test_ssh_access() {
   echo ""
   echo "From your LOCAL machine, open a NEW terminal and run:"
   echo ""
-  echo -e "${CYAN}  ssh ${SYSADMIN_USER}@YOUR_SERVER_IP${NC}"
-  echo ""
-  echo "If using a custom key:"
-  echo ""
-  echo -e "${CYAN}  ssh -i ~/.ssh/your-key ${SYSADMIN_USER}@YOUR_SERVER_IP${NC}"
+  TUNNEL_ONLY_MARKER="/etc/hosting-blueprint/tunnel-only.enabled"
+  tunnel_domain=""
+  if [ -f "$TUNNEL_ONLY_MARKER" ]; then
+    tunnel_domain="$(grep -E '^domain=' "$TUNNEL_ONLY_MARKER" 2>/dev/null | head -1 | cut -d= -f2- || true)"
+    if [ -z "${tunnel_domain:-}" ] && [ -f /opt/vm-config/setup.conf ]; then
+      tunnel_domain="$(grep -E '^DOMAIN=' /opt/vm-config/setup.conf 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\"' || true)"
+    fi
+  fi
+
+  if [ -n "${tunnel_domain:-}" ] && [ -f "$TUNNEL_ONLY_MARKER" ]; then
+    base_alias="${tunnel_domain%%.*}"
+    echo -e "${CYAN}  ssh ${base_alias}${NC}"
+    echo -e "${CYAN}  # (connects to ssh.${tunnel_domain} as ${SYSADMIN_USER})${NC}"
+    echo ""
+    echo "Tip: if you haven't configured your local SSH alias yet:"
+    echo -e "${CYAN}  curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/scripts/setup-local-ssh.sh | bash -s -- ssh.${tunnel_domain} ${SYSADMIN_USER}${NC}"
+  else
+    echo -e "${CYAN}  ssh ${SYSADMIN_USER}@YOUR_SERVER_IP${NC}"
+    echo ""
+    echo "If using a custom key:"
+    echo ""
+    echo -e "${CYAN}  ssh -i ~/.ssh/your-key ${SYSADMIN_USER}@YOUR_SERVER_IP${NC}"
+  fi
   echo ""
   echo -e "${RED}⚠️  DO NOT close this session until SSH as ${SYSADMIN_USER} works!${NC}"
   echo ""
@@ -379,10 +438,15 @@ test_ssh_access() {
     echo ""
     echo -e "${YELLOW}Now test ${APPMGR_USER} access (used for CI/CD):${NC}"
     echo ""
-    echo -e "${CYAN}  ssh ${APPMGR_USER}@YOUR_SERVER_IP${NC}"
-    echo ""
-    echo "Or if using custom key:"
-    echo -e "${CYAN}  ssh -i ~/.ssh/your-key ${APPMGR_USER}@YOUR_SERVER_IP${NC}"
+    if [ -n "${tunnel_domain:-}" ] && [ -f "$TUNNEL_ONLY_MARKER" ]; then
+      base_alias="${tunnel_domain%%.*}"
+      echo -e "${CYAN}  ssh ${base_alias}-${APPMGR_USER} \"hosting status dev\"${NC}"
+    else
+      echo -e "${CYAN}  ssh ${APPMGR_USER}@YOUR_SERVER_IP \"hosting status dev\"${NC}"
+      echo ""
+      echo "Or if using custom key:"
+      echo -e "${CYAN}  ssh -i ~/.ssh/your-key ${APPMGR_USER}@YOUR_SERVER_IP \"hosting status dev\"${NC}"
+    fi
     echo ""
 
     if confirm "Have you successfully logged in as ${APPMGR_USER}?" "n"; then
@@ -394,18 +458,26 @@ test_ssh_access() {
 
     # Offer to lock passwords now that SSH works
     echo ""
-    echo -e "${CYAN}Now that SSH key auth works, lock user passwords?${NC}"
-    echo "  • Forces SSH-only authentication (more secure)"
-    echo "  • Passwords can still be used via cloud console (emergency access)"
+    echo -e "${CYAN}Password hardening:${NC}"
+    echo "  • SSH password authentication is already disabled by SSH hardening."
+    echo "  • appmgr should stay password-locked (CI-only user)."
     echo ""
 
-    if confirm "Lock passwords for ${SYSADMIN_USER} and ${APPMGR_USER}?" "y"; then
-      sudo passwd -l "$SYSADMIN_USER" 2>/dev/null || true
+    if confirm "Ensure password is locked for ${APPMGR_USER} (recommended)?" "y"; then
       sudo passwd -l "$APPMGR_USER" 2>/dev/null || true
-      print_success "Passwords locked - SSH-only authentication enforced"
-      print_info "To unlock: sudo passwd -u <username>"
+      print_success "${APPMGR_USER} password locked"
+    fi
+
+    # sysadmin password is used for sudo when SYSADMIN_SUDO_MODE=password.
+    if [ -f "/etc/sudoers.d/${SYSADMIN_USER}" ]; then
+      echo ""
+      print_info "${SYSADMIN_USER} has passwordless sudo (/etc/sudoers.d/${SYSADMIN_USER} exists)."
+      if confirm "Lock password for ${SYSADMIN_USER} too? (optional; affects console login)" "n"; then
+        sudo passwd -l "$SYSADMIN_USER" 2>/dev/null || true
+        print_success "${SYSADMIN_USER} password locked"
+      fi
     else
-      print_info "Passwords remain active - remember to use strong passwords!"
+      print_info "Not locking ${SYSADMIN_USER} password (sudo may require it)."
     fi
 
     return 0
@@ -474,7 +546,7 @@ display_next_steps() {
   echo ""
   echo -e "3. ${BOLD}Deploy your first app${NC}"
   echo "   cp -r apps/_template apps/myapp"
-  echo "   cd apps/myapp && docker compose up -d"
+  echo "   cd apps/myapp && sudo docker compose up -d"
   echo ""
   echo -e "4. ${BOLD}Set up GitOps CI/CD${NC}"
   echo "   See: .github/workflows/deploy.yml"

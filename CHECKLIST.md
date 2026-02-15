@@ -111,7 +111,7 @@ Use this checklist before publishing your VM template to GitHub or deploying to 
 
 - [ ] **Backup system works** - scripts/maintenance/backup-volumes.sh runs
 - [ ] **Cron jobs configured** - automatic updates and backups scheduled
-- [ ] **Monitoring is set up** - Netdata or Portainer available
+- [ ] **Monitoring is set up** - Prefer separate monitoring VPS; optionally run Netdata and protect with Cloudflare Access
 - [ ] **Disk cleanup works** - scripts/maintenance/docker-cleanup.sh runs
 - [ ] **Log rotation configured** - /etc/logrotate.d/ has configs
 - [ ] **Health checks enabled** - all containers have healthcheck
@@ -167,7 +167,7 @@ cd /opt/hosting-blueprint
 # 4. Deploy example app
 cp -r apps/examples/hello-world /srv/apps/production/test-app
 cd /srv/apps/production/test-app
-docker compose up -d
+sudo docker compose up -d
 
 # 5. Verify zero open ports
 nmap -p- $(hostname -I | awk '{print $1}')

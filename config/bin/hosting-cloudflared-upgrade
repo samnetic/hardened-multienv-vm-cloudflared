@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# =================================================================
+# hosting-cloudflared-upgrade (hosting-blueprint)
+# =================================================================
+# Security goal: keep cloudflared patched even if unattended-upgrades is
+# configured to only take Ubuntu security origins.
+#
+# This script is intended to run from a systemd timer.
+# =================================================================
+
+set -euo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+
+log() {
+  logger -t hosting-cloudflared-upgrade -- "$1" || true
+}
+
+if [ "${EUID:-0}" -ne 0 ]; then
+  echo "ERROR: must run as root" >&2
+  exit 1
+fi
+
+if ! command -v apt-get >/dev/null 2>&1; then
+  log "apt-get not found; skipping"
+  exit 0
+fi
+
+if ! dpkg -s cloudflared >/dev/null 2>&1; then
+  log "cloudflared not installed; skipping"
+  exit 0
+fi
+
+log "Starting cloudflared upgrade"
+
+apt-get -o Dpkg::Lock::Timeout=300 -o Acquire::Retries=3 update
+apt-get -o Dpkg::Lock::Timeout=300 -o Acquire::Retries=3 install -y --only-upgrade cloudflared
+
+log "cloudflared upgrade complete"

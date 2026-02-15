@@ -21,9 +21,15 @@
 set -euo pipefail
 
 # Configuration
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
-SECRETS_DIR="${REPO_DIR}/secrets"
+# Default to system secrets on servers. Override for local/dev with:
+#   SECRETS_DIR=./secrets ./scripts/secrets/rotate-secret.sh dev api_key
+SECRETS_DIR="${SECRETS_DIR:-/var/secrets}"
+SECRETS_GROUP="${SECRETS_GROUP:-hosting-secrets}"
+SECRETS_GID="${SECRETS_GID:-1999}"
+SYSTEM_SECRETS=false
+if [ "$SECRETS_DIR" = "/var/secrets" ]; then
+  SYSTEM_SECRETS=true
+fi
 BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-30}"
 ENCRYPTION_KEY_FILE="${ENCRYPTION_KEY_FILE:-$HOME/.secrets-key}"
 
@@ -32,6 +38,11 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
+
+# Re-exec with sudo when rotating system secrets
+if [ "$SYSTEM_SECRETS" = true ] && [ "${EUID:-0}" -ne 0 ]; then
+  exec sudo SECRETS_DIR="$SECRETS_DIR" SECRETS_GROUP="$SECRETS_GROUP" SECRETS_GID="$SECRETS_GID" BACKUP_RETENTION_DAYS="$BACKUP_RETENTION_DAYS" ENCRYPTION_KEY_FILE="$ENCRYPTION_KEY_FILE" "$0" "$@"
+fi
 
 # Parse arguments
 ENCRYPT=false
@@ -74,6 +85,12 @@ fi
 
 ENVIRONMENT="$1"
 SECRET_NAME="$2"
+
+# Normalize environment aliases
+if [ "$ENVIRONMENT" = "prod" ]; then
+  ENVIRONMENT="production"
+fi
+
 SECRET_FILE="${SECRETS_DIR}/${ENVIRONMENT}/${SECRET_NAME}.txt"
 BACKUP_DIR="${SECRETS_DIR}/${ENVIRONMENT}/.backups"
 TIMESTAMP=$(date +%Y%m%d%H%M%S)
@@ -82,6 +99,22 @@ TIMESTAMP=$(date +%Y%m%d%H%M%S)
 if [[ ! "$ENVIRONMENT" =~ ^(dev|staging|production)$ ]]; then
   echo -e "${RED}Error: Invalid environment '$ENVIRONMENT'${NC}"
   exit 1
+fi
+
+# Validate secret name
+if [[ ! "$SECRET_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
+  echo -e "${RED}Error: Invalid secret name '$SECRET_NAME'${NC}"
+  exit 1
+fi
+
+# Ensure system secrets prerequisites
+if [ "$SYSTEM_SECRETS" = true ]; then
+  if ! getent group "$SECRETS_GROUP" >/dev/null 2>&1; then
+    echo -e "${RED}Error: Required group '$SECRETS_GROUP' not found${NC}"
+    echo "Run: sudo ./scripts/setup-vm.sh"
+    exit 1
+  fi
+  install -d -m 0750 -o root -g "$SECRETS_GROUP" "$SECRETS_DIR" "${SECRETS_DIR}/${ENVIRONMENT}"
 fi
 
 # Check if secret exists
@@ -96,7 +129,12 @@ echo "Rotating secret: ${ENVIRONMENT}/${SECRET_NAME}"
 echo ""
 
 # Create backup directory
-mkdir -p "$BACKUP_DIR"
+if [ "$SYSTEM_SECRETS" = true ]; then
+  install -d -m 0750 -o root -g "$SECRETS_GROUP" "$BACKUP_DIR"
+else
+  mkdir -p "$BACKUP_DIR"
+  chmod 0700 "$BACKUP_DIR" 2>/dev/null || true
+fi
 
 # Setup encryption if requested
 setup_encryption() {
@@ -137,12 +175,22 @@ if [ "$ENCRYPT" = true ]; then
     -in "$SECRET_FILE" \
     -out "$BACKUP_FILE" \
     -pass file:"$ENCRYPTION_KEY_FILE"
-  chmod 600 "$BACKUP_FILE"
+  if [ "$SYSTEM_SECRETS" = true ]; then
+    chown root:"$SECRETS_GROUP" "$BACKUP_FILE"
+    chmod 0640 "$BACKUP_FILE"
+  else
+    chmod 0600 "$BACKUP_FILE"
+  fi
   echo -e "${GREEN}✓ Encrypted backup created: ${BACKUP_FILE}${NC}"
 else
   BACKUP_FILE="${BACKUP_DIR}/${SECRET_NAME}.${TIMESTAMP}.txt"
   cp "$SECRET_FILE" "$BACKUP_FILE"
-  chmod 600 "$BACKUP_FILE"
+  if [ "$SYSTEM_SECRETS" = true ]; then
+    chown root:"$SECRETS_GROUP" "$BACKUP_FILE"
+    chmod 0640 "$BACKUP_FILE"
+  else
+    chmod 0600 "$BACKUP_FILE"
+  fi
   echo -e "${GREEN}✓ Backup created: ${BACKUP_FILE}${NC}"
 
   # Warn about plaintext backup for production
@@ -172,8 +220,15 @@ if [ -z "$NEW_VALUE" ]; then
 fi
 
 # Write new secret
-echo -n "$NEW_VALUE" > "$SECRET_FILE"
-chmod 600 "$SECRET_FILE"
+if [ "$SYSTEM_SECRETS" = true ]; then
+  install -m 0640 -o root -g "$SECRETS_GROUP" /dev/null "$SECRET_FILE"
+  printf "%s" "$NEW_VALUE" > "$SECRET_FILE"
+  chown root:"$SECRETS_GROUP" "$SECRET_FILE"
+  chmod 0640 "$SECRET_FILE"
+else
+  printf "%s" "$NEW_VALUE" > "$SECRET_FILE"
+  chmod 0600 "$SECRET_FILE"
+fi
 
 echo ""
 echo -e "${GREEN}✓ Secret rotated successfully${NC}"
@@ -197,7 +252,7 @@ fi
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo "  1. Redeploy the application to pick up the new secret:"
-echo "     docker compose -f apps/<your-app>/compose.yml up -d"
+echo "     sudo docker compose -f apps/<your-app>/compose.yml up -d"
 echo ""
 echo "  2. Verify the application works with the new secret"
 echo ""

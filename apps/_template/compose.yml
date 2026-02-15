@@ -9,8 +9,12 @@
 services:
   app:
     # Your app image
-    image: your-app:latest
-    # Or build from Dockerfile
+    # Use a pinned version tag or digest. Avoid :latest in production.
+    image: ghcr.io/your-org/your-app:1.0.0
+
+    # On-VM builds are discouraged and blocked by the hardened GitOps deploy tool by default.
+    # If you really need on-host builds, set ALLOW_BUILD=1 in:
+    #   /etc/hosting-blueprint/deploy-policy.env   (root-owned)
     # build:
     #   context: .
     #   dockerfile: Dockerfile
@@ -20,6 +24,8 @@ services:
 
     # Restart policy
     restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
 
     # =================================================================
     # Security Hardening (2025 Standards)
@@ -38,14 +44,17 @@ services:
     #   - SETGID            # Change GID
     #   - SETUID            # Change UID
 
-    # Read-only filesystem (if app doesn't write to filesystem)
-    # Set to true for maximum security if possible
-    read_only: false
+    # Prefer a read-only filesystem. Set to false if your app must write to disk.
+    read_only: true
 
     # If read_only is true, add tmpfs for writable temp space
-    # tmpfs:
-    #   - /tmp
-    #   - /var/run
+    tmpfs:
+      - /tmp:size=64M,mode=1777
+    # Some apps need /var/run too:
+    # - /var/run
+
+    # Fork-bomb protection
+    pids_limit: 200
 
     # =================================================================
     # Resource Limits (Prevent abuse)
@@ -72,6 +81,17 @@ services:
       start_period: 40s
 
     # =================================================================
+    # Logging (Prevent disk exhaustion)
+    # =================================================================
+    # The VM config already sets Docker's daemon-wide log rotation.
+    # This is an extra, per-service defense-in-depth.
+    logging:
+      driver: "local"
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+    # =================================================================
     # Environment Variables
     # =================================================================
     environment:
@@ -95,6 +115,12 @@ services:
       # - JWT_SECRET_FILE=/run/secrets/jwt_secret
       # - SMTP_PASSWORD_FILE=/run/secrets/smtp_password
 
+    # If your container runs as non-root, it still needs to read secret files.
+    # The setup uses a dedicated host group "hosting-secrets" (GID 1999) and
+    # secrets stored as root:hosting-secrets with mode 640.
+    group_add:
+      - "1999"
+
     # Load additional variables from .env file
     env_file:
       - .env
@@ -104,15 +130,15 @@ services:
     # =================================================================
     volumes:
       # =================================================================
-      # Secret files (from repo secrets/ directory)
+      # Secret files (from /var/secrets - never in git)
       # =================================================================
       # Mount secrets as read-only files to /run/secrets/
       # Create secrets with: ./scripts/secrets/create-secret.sh <env> <name>
       # =================================================================
-      - ../../secrets/${ENVIRONMENT}/db_password.txt:/run/secrets/db_password:ro
-      - ../../secrets/${ENVIRONMENT}/api_key.txt:/run/secrets/api_key:ro
-      # - ../../secrets/${ENVIRONMENT}/jwt_secret.txt:/run/secrets/jwt_secret:ro
-      # - ../../secrets/${ENVIRONMENT}/smtp_password.txt:/run/secrets/smtp_password:ro
+      - /var/secrets/${ENVIRONMENT}/db_password.txt:/run/secrets/db_password:ro
+      - /var/secrets/${ENVIRONMENT}/api_key.txt:/run/secrets/api_key:ro
+      # - /var/secrets/${ENVIRONMENT}/jwt_secret.txt:/run/secrets/jwt_secret:ro
+      # - /var/secrets/${ENVIRONMENT}/smtp_password.txt:/run/secrets/smtp_password:ro
 
       # =================================================================
       # App data volumes (uncomment if needed)

@@ -46,11 +46,12 @@ print_success() {
 
 # Check if running on server
 check_not_server() {
-  if [ -f "/opt/hosting-blueprint/.vm-setup-complete" ]; then
+  if [ -f "/opt/vm-config/setup.complete" ] || [ -f "/opt/hosting-blueprint/.vm-setup-complete" ]; then
     print_error "This script should run on your LOCAL machine, not the server!"
     print_info "You've already set up this server. If you need to add new keys, use:"
     print_info "  sudo adduser newuser"
-    print_info "  sudo usermod -aG docker newuser"
+    print_info "  sudo usermod -aG sudo newuser   # if they need admin access"
+    print_info "  # Avoid adding users to the docker group (docker group is root-equivalent)."
     exit 1
   fi
 }
@@ -241,7 +242,7 @@ main() {
   print_info "   ssh root@your-vm-ip"
   echo
   print_step "2. Run the one-liner setup:"
-  print_info "   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm/main/bootstrap.sh | sudo bash"
+  print_info "   curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/bootstrap.sh | sudo bash"
   echo
   print_step "3. When prompted, paste the public keys shown above"
   echo

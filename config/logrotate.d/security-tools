@@ -1,0 +1,16 @@
+# =================================================================
+# Logrotate: Security Tools (hosting-blueprint)
+# =================================================================
+# Copy to: /etc/logrotate.d/security-tools
+# =================================================================
+
+/var/log/hosting-blueprint/security/*.log {
+  daily
+  rotate 14
+  compress
+  delaycompress
+  missingok
+  notifempty
+  create 0640 root adm
+}
+

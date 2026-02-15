@@ -1,0 +1,32 @@
+# =================================================================
+# Sudoers: appmgr limited deploy permissions (CI-only)
+# =================================================================
+# Install to: /etc/sudoers.d/appmgr-hosting-deploy
+# Validate:   sudo visudo -cf /etc/sudoers.d/appmgr-hosting-deploy
+#
+# Purpose:
+# - Allow the `appmgr` CI user to execute ONLY the hosting deploy tool
+#   with a strict, argument-scoped allowlist.
+# - This is used by sshd ForceCommand wrapper: /usr/local/sbin/hosting-ci-ssh
+# =================================================================
+
+Cmnd_Alias HOSTING_SYNC = \
+  /usr/local/sbin/hosting-deploy sync --env dev, \
+  /usr/local/sbin/hosting-deploy sync --env staging, \
+  /usr/local/sbin/hosting-deploy sync --env production
+
+Cmnd_Alias HOSTING_DEPLOY = \
+  /usr/local/sbin/hosting-deploy deploy --env dev, \
+  /usr/local/sbin/hosting-deploy deploy --env dev --ref *, \
+  /usr/local/sbin/hosting-deploy deploy --env staging, \
+  /usr/local/sbin/hosting-deploy deploy --env staging --ref *, \
+  /usr/local/sbin/hosting-deploy deploy --env production, \
+  /usr/local/sbin/hosting-deploy deploy --env production --ref *
+
+Cmnd_Alias HOSTING_STATUS = \
+  /usr/local/sbin/hosting-deploy status --env dev, \
+  /usr/local/sbin/hosting-deploy status --env staging, \
+  /usr/local/sbin/hosting-deploy status --env production
+
+appmgr ALL=(root) NOPASSWD: HOSTING_SYNC, HOSTING_DEPLOY, HOSTING_STATUS
+

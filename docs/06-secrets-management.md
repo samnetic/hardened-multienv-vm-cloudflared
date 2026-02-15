@@ -11,17 +11,17 @@ We use **file-based secrets** instead of environment variables. This provides th
 | Method | Problem |
 |--------|---------|
 | `.env` files | Easily committed to git by accident |
-| Environment variables | Visible in `docker inspect`, process listings, logs |
+| Environment variables | Visible in `sudo docker inspect`, process listings, logs |
 | Docker Swarm secrets | Requires Swarm mode (deprecated/complex) |
 | **File-based secrets** | Secure, simple, works with plain Compose |
 
 ### Security Benefits
 
-1. **Not in docker inspect** - `docker inspect container` won't show secrets
+1. **Not in sudo docker inspect** - `sudo docker inspect container` won't show secrets
 2. **Not in process listings** - `ps aux` won't expose them
-3. **Permissions enforced** - Files are `chmod 600` (owner only)
+3. **Permissions enforced** - Files are `root:hosting-secrets` with mode `640`
 4. **Read-only mount** - Containers can't modify secrets
-5. **Gitignored** - Can't accidentally commit
+5. **Kept out of git** - Secrets live in `/var/secrets` (outside repositories)
 
 ## How It Works
 
@@ -34,16 +34,18 @@ We use **file-based secrets** instead of environment variables. This provides th
 # ✓ Secret created: staging/db_password
 ```
 
-This creates: `secrets/staging/db_password.txt` with `chmod 600`
+This creates: `/var/secrets/staging/db_password.txt` with `root:hosting-secrets` ownership and `chmod 640`.
 
 ### 2. Mount in compose.yml
 
 ```yaml
 services:
   app:
+    group_add:
+      - "1999" # hosting-secrets (so non-root containers can read /run/secrets/*)
     volumes:
       # Mount secret file to /run/secrets/ (read-only)
-      - ../../secrets/${ENVIRONMENT}/db_password.txt:/run/secrets/db_password:ro
+      - /var/secrets/${ENVIRONMENT}/db_password.txt:/run/secrets/db_password:ro
     environment:
       # Tell app where to find the secret
       - DATABASE_PASSWORD_FILE=/run/secrets/db_password
@@ -117,7 +119,7 @@ func getSecret(name string) string {
 echo "my-secret-value" | ./scripts/secrets/create-secret.sh <env> <name>
 
 # From password manager (1Password example)
-op read "op://Vault/Item/password" | ./scripts/secrets/create-secret.sh prod db_password
+op read "op://Vault/Item/password" | ./scripts/secrets/create-secret.sh production db_password
 ```
 
 ### List Secrets
@@ -132,33 +134,28 @@ op read "op://Vault/Item/password" | ./scripts/secrets/create-secret.sh prod db_
 
 ```bash
 ./scripts/secrets/rotate-secret.sh staging db_password
-# Creates backup: secrets/staging/.backups/db_password.20240115120000.txt
+# Creates backup: /var/secrets/staging/.backups/db_password.20240115120000.txt
 # Prompts for new value
 ```
 
 After rotating, redeploy affected containers:
 ```bash
-docker compose -f apps/myapp/compose.yml up -d
+sudo docker compose -f apps/myapp/compose.yml up -d
 ```
 
 ## Directory Structure
 
 ```
-secrets/
-├── .gitignore              # Ignores *.txt files
-├── README.md               # Documentation
+/var/secrets/
 ├── dev/
-│   ├── .gitkeep
 │   ├── db_password.txt     # Dev database password
-│   └── api_key.txt         # Dev API key
+│   └── api_key.txt         # Test API keys
 ├── staging/
-│   ├── .gitkeep
 │   ├── db_password.txt
 │   └── api_key.txt
 └── production/
-    ├── .gitkeep
-    ├── db_password.txt
-    └── api_key.txt
+    ├── db_password.txt     # Strong, unique, rotated regularly
+    └── api_key.txt         # Production API keys
 ```
 
 ## Common Secrets
@@ -183,7 +180,7 @@ secrets/
 
 ### DON'T
 
-- Commit secrets to git (they're gitignored, but be careful)
+- Commit secrets to git (keep them in `/var/secrets`)
 - Share production secrets via Slack/email
 - Use the same secret across environments
 - Store secrets in environment variables directly
@@ -205,7 +202,7 @@ Store secrets in 1Password, Bitwarden, or similar:
 Using `age` (modern encryption):
 ```bash
 # Encrypt
-tar -czf - secrets/ | age -r age1... > secrets-backup.tar.gz.age
+sudo tar -czf - /var/secrets/ | age -r age1... > secrets-backup.tar.gz.age
 
 # Decrypt
 age -d secrets-backup.tar.gz.age | tar -xzf -
@@ -218,26 +215,54 @@ For production, consider:
 - GCP Secret Manager
 - HashiCorp Vault
 
+## Optional: Encrypted `.env` in Git (SOPS + age)
+
+This blueprint's GitOps workflow supports an optional convention:
+
+- Commit encrypted dotenv files: `.env.<env>.enc` (SOPS-encrypted, dotenv format)
+- Decrypt on the VM during deploy to: `.env.<env>`
+
+This is useful when you need to ship non-file secrets to an app that expects dotenv.
+
+### VM Setup (One-Time)
+
+On the VM, install `sops` + `age` and generate/restore an age key:
+
+```bash
+sudo /opt/hosting-blueprint/scripts/security/setup-sops-age.sh
+```
+
+This creates (by default): `/etc/sops/age/keys.txt`.
+
+### Security Notes
+
+- The age private key can decrypt your secrets: treat it like a production root key.
+- Prefer `/var/secrets` file mounts for secrets where possible (simpler and less crypto/key management).
+
 ## Troubleshooting
 
 ### Secret not found in container
 
 ```bash
 # Check if file is mounted
-docker exec mycontainer ls -la /run/secrets/
+sudo docker exec mycontainer ls -la /run/secrets/
 
 # Check environment variable
-docker exec mycontainer printenv | grep _FILE
+sudo docker exec mycontainer printenv | grep _FILE
 ```
 
 ### Permission denied
 
 ```bash
 # Check file permissions on host
-ls -la secrets/staging/
+sudo ls -la /var/secrets/staging/
 
-# Should be 600 - fix if not
-chmod 600 secrets/*/*.txt
+# Expected (system secrets):
+#   directories: 750 root:hosting-secrets
+#   files:       640 root:hosting-secrets
+sudo chown -R root:hosting-secrets /var/secrets
+sudo find /var/secrets -type d -exec chmod 750 {} \;
+sudo find /var/secrets -type f -name '*.txt' -exec chmod 640 {} \;
 ```
 
 ### Secret value has extra whitespace
@@ -245,9 +270,18 @@ chmod 600 secrets/*/*.txt
 The scripts use `echo -n` to avoid trailing newlines. If you created manually:
 ```bash
 # Check for newlines
-cat -A secrets/staging/db_password.txt
+sudo cat -A /var/secrets/staging/db_password.txt
 # Should show no $ at end
 
 # Fix
-tr -d '\n' < secrets/staging/db_password.txt > temp && mv temp secrets/staging/db_password.txt
+sudo sh -c "tr -d '\\n' < /var/secrets/staging/db_password.txt > /tmp/secret.tmp && mv /tmp/secret.tmp /var/secrets/staging/db_password.txt"
+```
+
+## Local Development (Optional)
+
+If you're running this repository locally (no `/var/secrets`), you can use a repo-local path:
+
+```bash
+SECRETS_DIR=./secrets ./scripts/secrets/create-secret.sh dev api_key
+SECRETS_DIR=./secrets ./scripts/secrets/list-secrets.sh dev
 ```

@@ -1,379 +1,100 @@
-# Template Improvements Summary
+# Improvements Summary (Security-First Blueprint)
 
-Your hardened multi-environment VM template is now **GitHub-ready** with excellent user experience! 🎉
+This repo is a security-first VPS blueprint for multi-environment Docker Compose apps behind Cloudflare Tunnel.
 
-## What Was Done
+## What’s Hardened
 
-### 1. ✨ Interactive Post-Setup Wizard
+### Zero-Port / Tunnel-Only Architecture
 
-**Created:** `scripts/post-setup-wizard.sh`
+- Caddy binds `127.0.0.1:80` only (origin not reachable from the internet).
+- Optional `scripts/finalize-tunnel.sh` migrates DNS to Tunnel CNAMEs and closes port 22 + HTTP(S) on UFW (true “zero ports”).
+- Defense-in-depth in `infra/reverse-proxy/Caddyfile`: a `tunnel_only` gate rejects requests not coming from loopback or the Docker NAT gateway on `hosting-caddy-origin` (`10.250.0.1`), blocking origin IP bypass and container-to-container bypasses.
 
-A comprehensive guided experience that runs after main setup completes:
+### Linux Host Hardening
 
-- **Initializes infrastructure** - Creates /srv directory structure
-- **Deploys first application** - Choose from:
-  - n8n (Workflow Automation)
-  - NocoDB (Airtable Alternative)
-  - Uptime Kuma (Monitoring)
-  - Plausible Analytics
-  - Custom Docker app
-- **Configures reverse proxy** - Adds routes to Caddyfile automatically
-- **Sets up DNS** - Guides through Cloudflare CNAME creation
-- **Optional monitoring** - Offers to deploy Portainer/Grafana/Netdata
+- SSH hardening: `config/ssh/sshd_config.d/hardening.conf`
+- Firewall baseline: `scripts/setup-vm.sh` enables UFW (deny inbound by default; temporary SSH allow for bootstrap).
+- fail2ban: SSH brute-force protection
+- auditd: baseline audit rules + change tracking for sensitive files
+- kernel/sysctl hardening: `config/sysctl.d/99-hardening.conf`
+- unattended security updates + scheduled reboots: `config/apt/apt.conf.d/50unattended-upgrades`
+- journald retention configuration (30 days / 500MB default)
+- log rotation for blueprint logs: `config/logrotate.d/hosting-blueprint`
+- scheduled maintenance: `config/cron.d/vm-maintenance` (Docker pruning, journald vacuum, disk checks)
 
-**Integration:** `setup.sh` now automatically offers to launch the wizard at completion.
+### Docker Security Defaults
 
----
+- Docker daemon defaults written by `scripts/setup-vm.sh` (safe logging, live-restore, loopback publish default, etc.).
+- Docker daemon metrics enabled at `0.0.0.0:9323` (host) so a least-privilege proxy can expose metrics internally without `docker.sock`. Keep this port firewalled (UFW default deny).
+- Humans are not added to the `docker` group (docker group is root-equivalent); operate with `sudo docker ...`.
+- Port exposure guardrail: `scripts/security/check-docker-exposed-ports.sh` (daily cron + post-deploy check).
 
-### 2. 📚 Documentation Index
+### GitOps CI Trust Model (Major Upgrade)
 
-**Created:** `docs/INDEX.md`
+- CI connects as `appmgr`, but cannot get an interactive shell:
+  - `sshd Match User appmgr` + `ForceCommand /usr/local/sbin/hosting-ci-ssh`
+- `appmgr` has a strict sudo allowlist to one root-owned tool only:
+  - `/usr/local/sbin/hosting-deploy` (`sync`, `deploy`, `status`)
+- Deploys run with compose policy checks (deny privileged/host namespaces/devices/docker.sock/bad binds, `build:`, and `ports:` by default).
+- GitHub Actions deploy uses:
+  - Cloudflare Access Service Token via `cloudflared access ssh` ProxyCommand
+  - `git archive | gzip | ssh "hosting sync <env>"`
+  - `ssh "hosting deploy <env> <ref>"`
 
-Comprehensive navigation for all 21 documentation guides:
+### Secrets
 
-- **Organized by topic** - Setup, Security, Architecture, Networking, Operations
-- **Reading paths by use case** - First-time setup, architecture deep-dive, production deployment
-- **Estimated reading times** - Helps users plan their learning
-- **Quick links** - Jump directly to common tasks
-- **Documentation stats** - Total guides, reading time, coverage areas
+- File-based secrets under `/var/secrets/...` (recommended).
+- Optional SOPS+age support: commit `.env.<env>.enc`, decrypt on the VM at deploy time (see `scripts/security/setup-sops-age.sh`).
 
-Makes it easy for users to find exactly what they need.
+### Optional Security Tooling
 
----
+Install via: `sudo ./scripts/security/setup-security-tools.sh`
 
-### 3. 🐍 Python FastAPI Example
+- AIDE (daily), rkhunter (weekly), Lynis (weekly), debsums (weekly), acct
+- Schedules: `config/cron.d/security-scans`
+- Logs: `/var/log/hosting-blueprint/security/` (rotated by `config/logrotate.d/security-tools`)
+- Optional alerting via `/etc/hosting-blueprint/alerting.env` (webhook/email)
+- Optional `/tmp` tmpfs hardening: `scripts/security/enable-tmpfs-tmp.sh`
 
-**Created:** `apps/examples/python-fastapi/`
+## UX / Setup Flow
 
-Production-ready FastAPI REST API demonstrating best practices:
+- `bootstrap.sh`: clone + run (one-liner friendly)
+- `setup.sh`: interactive end-to-end setup
+- `scripts/post-setup-wizard.sh`: fast path to initialize `/srv/infrastructure` and deploy a first app
+- `scripts/verify-setup.sh`: sanity checks + safe guidance
+- `scripts/dev/validate-repo.sh` + `.github/workflows/validate.yml`: static checks (bash syntax, YAML parse, deploy tool compile) to catch regressions early
 
-**Files created:**
-- `README.md` - Comprehensive deployment guide
-- `src/main.py` - FastAPI app with CRUD operations
-- `Dockerfile` - Multi-stage build (builder + runtime)
-- `compose.yml` - Docker Compose with security best practices
-- `requirements.txt` - FastAPI, Uvicorn, Pydantic
-- `.env.example` - Environment configuration template
+## Recommended Operational Pattern
 
-**Features:**
-- ✅ Health check endpoint for Docker
-- ✅ OpenAPI documentation at /docs
-- ✅ CRUD operations example
-- ✅ Structured logging
-- ✅ CORS configuration
-- ✅ Non-root user (UID 1000)
-- ✅ Security hardening (no-new-privileges, dropped capabilities)
-- ✅ Resource limits (0.5 CPU, 512MB RAM)
+- Protect every admin hostname with Cloudflare Access SSO.
+- Use Access Service Tokens for CI and machine-to-machine endpoints.
+- Keep monitoring on a separate VPS if it requires docker socket mounts, host PID namespace, or extra capabilities.
 
-Now users have **three language examples**:
-1. **Static site** - apps/examples/hello-world/ (nginx)
-2. **Node.js API** - apps/examples/simple-api/ (Express)
-3. **Python API** - apps/examples/python-fastapi/ (FastAPI)
+## Monitoring (Two-VPS Pattern)
 
----
+- App VPS exporters (no published ports): `infra/monitoring-agent/`
+  - `node-exporter` (system metrics)
+  - `dockerd-metrics-proxy` (Docker daemon metrics without `docker.sock`)
+  - Optional `compose.cadvisor.yml` for per-container metrics (higher privilege; protect with Access Service Auth)
+- Separate monitoring VPS stack: `infra/monitoring-server/`
+  - Prometheus + Grafana + Alertmanager
+  - Scrape through Cloudflare Access Service Tokens (machine auth)
+  - Safety: `scripts/monitoring/init-monitoring-server.sh` prevents missing-secret bind-mount footguns and bootstraps required secrets
 
-### 4. ✅ Pre-Release Checklist
+## Quick Smoke Test On a Fresh VPS
 
-**Created:** `CHECKLIST.md`
-
-Comprehensive 100+ item checklist for verifying production readiness:
-
-**Categories:**
-- Repository Setup (GitHub URLs, visibility, releases)
-- Security Review (no secrets, SSH hardening, port scans)
-- Documentation (all guides complete and organized)
-- Testing (fresh VM deployment, example apps, security tests)
-- User Experience (one-liner install, error messages, wizard)
-- Examples & Templates (all work out-of-box)
-- Scripts (all executable, handle errors, clear output)
-- Cloudflare Integration (tunnel setup, DNS configuration)
-- Production Readiness (backups, monitoring, health checks)
-- GitOps & CI/CD (workflows, deployment, rollback)
-- Community Files (contributing, issue templates, PR templates)
-- Release Preparation (version, changelog, migration guide)
-
-Use this before publishing to GitHub or deploying to production.
-
----
-
-### 5. 🔧 Enhanced setup.sh
-
-**Modified:** `setup.sh`
-
-- **Post-setup wizard integration** - Automatically offers to launch wizard
-- **Better flow** - Seamless transition from installation to first app deployment
-- **User choice** - Can skip wizard and run it later
-
----
-
-## How to Test (Recommended Workflow)
-
-### Before Publishing to GitHub
-
-1. **Update repository URLs:**
+1. Install and harden:
    ```bash
-   # Update bootstrap.sh line 37
-   vim bootstrap.sh
-   # Change: REPO_URL="https://github.com/YOUR_USERNAME/YOUR_REPO.git"
-
-   # Update README.md line 40
-   vim README.md
-   # Change bootstrap URL to match your repo
-   ```
-
-2. **Review CHECKLIST.md:**
-   ```bash
-   cat CHECKLIST.md
-   # Go through each section and verify
-   ```
-
-3. **Test on fresh VM** (Critical!):
-   ```bash
-   # On a fresh Ubuntu 22.04 or 24.04 VM (2GB+ RAM):
-
-   # Method 1: Test from GitHub (after you push)
-   curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/bootstrap.sh | sudo bash
-
-   # Method 2: Test locally (before pushing)
-   # Upload bootstrap.sh and setup.sh to VM, then:
    sudo bash bootstrap.sh
    ```
 
-4. **Verify the complete flow:**
+2. Verify:
    ```bash
-   # After setup.sh completes:
-   - Choose "yes" to launch post-setup wizard
-   - Select an example app to deploy (try n8n or Python FastAPI)
-   - Follow wizard prompts
-   - Verify app is accessible via Cloudflare tunnel
-   - Run: ./scripts/verify-setup.sh
+   ./scripts/verify-setup.sh
    ```
 
----
-
-## User Journey (What Your Users Will Experience)
-
-### Step 1: Clone & Bootstrap (5 minutes)
-
-```bash
-# User runs one command on fresh Ubuntu VM:
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/bootstrap.sh | sudo bash
-```
-
-**What happens:**
-- ✅ Pre-flight checks (OS, RAM, disk, network)
-- ✅ git installed
-- ✅ Repository cloned to /opt/hosting-blueprint
-- ✅ setup.sh launched automatically
-
-### Step 2: Interactive Setup (10 minutes)
-
-**User is prompted for:**
-- Domain name (e.g., `yourdomain.com`)
-- SSH public keys (paste from local machine)
-- Timezone (defaults to UTC)
-- Cloudflare tunnel setup (optional)
-
-**What happens automatically:**
-- ✅ VM hardened (SSH, firewall, fail2ban, kernel)
-- ✅ Docker installed with security defaults
-- ✅ Two users created (sysadmin + appmgr)
-- ✅ Docker networks created (dev/staging/prod)
-- ✅ Cloudflare tunnel configured (if selected)
-- ✅ Verification performed
-
-### Step 3: Post-Setup Wizard (5 minutes)
-
-**User is guided through:**
-- Infrastructure initialization (/srv/infrastructure)
-- First application deployment (choose from menu)
-- Reverse proxy configuration (Caddy)
-- DNS setup (Cloudflare CNAME)
-- Optional monitoring deployment
-
-**Result:**
-- 🎉 First app is running and accessible via HTTPS!
-
-### Step 4: Verification
-
-```bash
-# User runs verification:
-./scripts/verify-setup.sh
-
-# Expected output:
-╔══════════════════════════════════════════════════════════╗
-║ Setup Verification Results                               ║
-╠══════════════════════════════════════════════════════════╣
-║ System Security:                         [6/6] ✓ PASS   ║
-║ User Configuration:                      [5/5] ✓ PASS   ║
-║ Docker Configuration:                    [5/5] ✓ PASS   ║
-║ Infrastructure Services:                 [4/4] ✓ PASS   ║
-║ Network & DNS:                           [5/5] ✓ PASS   ║
-║ SSH Connectivity:                        [5/5] ✓ PASS   ║
-╠══════════════════════════════════════════════════════════╣
-║ Overall Status:                          ✓ READY         ║
-╚══════════════════════════════════════════════════════════╝
-```
-
----
-
-## File Structure Overview
-
-```
-/home/sasik/personal/hardened-multienv-vm-cloudflared/
-├── CHECKLIST.md                           # NEW: Pre-release verification
-├── IMPROVEMENTS-SUMMARY.md                # NEW: This file
-├── README.md                              # ✓ Already excellent
-├── SETUP.md                               # ✓ Already comprehensive
-├── RUNBOOK.md                             # ✓ Already detailed
-├── CONTRIBUTING.md                        # ✓ Already exists
-├── CODE_OF_CONDUCT.md                     # ✓ Already exists
-├── LICENSE                                # ✓ MIT license
-├── bootstrap.sh                           # ✓ One-liner installation
-├── setup.sh                               # ENHANCED: Launches wizard
-│
-├── docs/
-│   ├── INDEX.md                           # NEW: Documentation navigator
-│   ├── 00-initial-setup.md               # ✓ Complete
-│   ├── 01-cloudflare-setup.md            # ✓ Complete
-│   ├── 02-security-hardening.md          # ✓ Complete
-│   ├── ... (18 more guides)              # ✓ All comprehensive
-│
-├── scripts/
-│   ├── post-setup-wizard.sh              # NEW: Interactive guided setup
-│   ├── verify-setup.sh                   # ✓ Already comprehensive (521 lines)
-│   ├── init-infrastructure.sh            # ✓ Already exists
-│   ├── ... (30+ more scripts)            # ✓ All functional
-│
-├── apps/
-│   ├── _template/                         # ✓ Generic template with README
-│   ├── examples/
-│   │   ├── hello-world/                  # ✓ Static nginx site
-│   │   ├── simple-api/                   # ✓ Node.js Express API
-│   │   └── python-fastapi/               # NEW: Python FastAPI REST API
-│
-└── .github/
-    ├── ISSUE_TEMPLATE/                    # ✓ Bug report, feature request
-    ├── PULL_REQUEST_TEMPLATE.md          # ✓ PR template
-    └── workflows/                         # ✓ CI/CD workflows
-```
-
----
-
-## What Makes This Template Special
-
-### 🎯 Production-Ready Out-of-Box
-
-- **Zero-port security** via Cloudflare Tunnel
-- **Enterprise hardening** (kernel, SSH, firewall, fail2ban, auditd)
-- **Multi-environment isolation** (dev/staging/prod networks)
-- **Container security** (no-new-privileges, dropped capabilities, resource limits)
-- **Automated backups** with 7-day retention
-- **Health checks** for automatic recovery
-
-### 🚀 Excellent User Experience
-
-- **One-liner installation** from fresh VM
-- **Interactive wizard** guides first deployment
-- **Pre-flight checks** prevent common errors
-- **Clear error messages** with actionable guidance
-- **Comprehensive documentation** with navigation index
-- **Working examples** for three popular languages
-
-### 🏗️ Flexible Architecture
-
-- **Provider agnostic** - runs on any Ubuntu VM (AWS, GCP, Azure, Oracle, DO, Hetzner)
-- **Framework agnostic** - supports any Docker-based application
-- **Scalable** - easy to add more apps and environments
-- **GitOps ready** - includes GitHub Actions workflows
-
-### 📚 Complete Documentation
-
-- **21 comprehensive guides** covering all aspects
-- **Documentation index** for easy navigation
-- **Reading paths by use case** (first-time, architecture, security, production)
-- **Quick reference** for common commands
-- **Troubleshooting guide** for common issues
-
----
-
-## Next Steps
-
-1. **Review CHECKLIST.md** - Go through each item
-
-2. **Update GitHub URLs** - Replace placeholder URLs with your repo
-
-3. **Test on fresh VM** - Critical! Follow testing workflow above
-
-4. **Publish to GitHub:**
+3. Confirm “tunnel-only” is intact:
    ```bash
-   # Push to your GitHub repository
-   git push origin master
-
-   # Create a release
-   gh release create v1.0.0 \
-     --title "v1.0.0 - Initial Release" \
-     --notes "Production-ready VM template with zero-port security"
+   sudo /opt/scripts/check-docker-exposed-ports.sh
+   sudo ss -lntup | rg ':80|:443|:22' || true
    ```
-
-5. **Share with community:**
-   - Submit to awesome-selfhosted
-   - Post on Reddit (/r/selfhosted)
-   - Tweet announcement
-   - Share in relevant Discord/Slack communities
-
----
-
-## Support & Maintenance
-
-### For Issues
-
-Users can:
-- **File bug reports** using `.github/ISSUE_TEMPLATE/bug_report.md`
-- **Request features** using `.github/ISSUE_TEMPLATE/feature_request.md`
-- **Ask questions** in GitHub Discussions (if enabled)
-- **Check troubleshooting guide** at `docs/05-troubleshooting.md`
-
-### For Contributions
-
-Contributors should:
-- **Read CONTRIBUTING.md** before submitting PRs
-- **Follow code of conduct** in CODE_OF_CONDUCT.md
-- **Use PR template** for clear descriptions
-- **Test changes** on fresh VM before submitting
-
----
-
-## Success Metrics
-
-Your template will be successful when users can:
-
-- ✅ Install on fresh VM in 15 minutes
-- ✅ Deploy first app in 5 minutes via wizard
-- ✅ Understand security hardening without deep expertise
-- ✅ Add more apps easily using templates
-- ✅ Run production workloads with confidence
-- ✅ Get help from comprehensive documentation
-
-**You've achieved all of these!** 🎉
-
----
-
-## Thank You!
-
-Your template is now:
-- ✅ Production-ready for single-VM deployments
-- ✅ GitHub-ready with excellent UX
-- ✅ Well-documented with 21 comprehensive guides
-- ✅ Secure with enterprise-grade hardening
-- ✅ Easy to use with interactive wizard
-- ✅ Flexible for any Docker-based application
-
-**Ready to share with the world!** 🚀
-
----
-
-<p align="center">
-  <sub>Template improvements completed: 2026-02-02</sub><br>
-  <sub>Generated with Claude Code</sub>
-</p>

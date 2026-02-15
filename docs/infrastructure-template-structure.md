@@ -1,6 +1,15 @@
 # Infrastructure Template Repository Structure
 
-This document describes the file structure for the GitHub template repository.
+> Note (2026-02-13): This document reflects an older "infrastructure monorepo" layout.
+>
+> The current blueprint uses:
+> - `/srv/infrastructure/` (infra runtime repo: `reverse-proxy/`, `monitoring/`, `cloudflared/`)
+> - `/srv/apps/{dev,staging,production}/` (deployments)
+> - `/var/secrets/{dev,staging,production}/` (secrets)
+>
+> Use these up-to-date docs instead:
+> - `docs/repository-structure.md`
+> - `docs/filesystem-layout.md`
 
 ## Directory Tree
 
@@ -33,10 +42,6 @@ infrastructure/
 │   ├── n8n/
 │   │   ├── docker-compose.yml
 │   │   ├── .env.example
-│   │   └── README.md
-│   │
-│   ├── portainer/
-│   │   ├── docker-compose.yml
 │   │   └── README.md
 │   │
 │   ├── nocodb/
@@ -81,16 +86,12 @@ See `scripts/init-infrastructure.sh` in this repo.
 #
 # Pattern: http://subdomain.{$DOMAIN} { reverse_proxy container:port }
 #
-# After editing, reload: docker compose restart
+# After editing, reload: sudo docker compose restart
 # =================================================================
 
 # Third-party apps
 http://n8n.{$DOMAIN} {
     reverse_proxy n8n-prod:5678
-}
-
-http://portainer.{$DOMAIN} {
-    reverse_proxy portainer-prod:9000
 }
 
 http://nocodb.{$DOMAIN} {
@@ -223,32 +224,13 @@ DOMAIN=yourdomain.com
 TIMEZONE=UTC
 ```
 
-### `apps/portainer/docker-compose.yml`
+### Portainer (Not Recommended)
 
-```yaml
-version: '3.8'
+Portainer typically requires access to the Docker socket (`/var/run/docker.sock`), which is **root-equivalent** on the host.
 
-services:
-  portainer:
-    image: portainer/portainer-ce:latest
-    container_name: portainer-prod
-    restart: unless-stopped
-    networks:
-      - prod-web
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - portainer_data:/data
-    command: --no-analytics
-    security_opt:
-      - no-new-privileges:true
-
-volumes:
-  portainer_data:
-
-networks:
-  prod-web:
-    external: true
-```
+For a security-first setup, prefer:
+- Docker CLI (`sudo docker ps`, `sudo docker compose logs`, etc.)
+- A separate monitoring/control-plane VPS protected with Cloudflare Access
 
 ### `README.md`
 
@@ -265,8 +247,8 @@ This repository contains all infrastructure configuration for your server.
 # SSH to server
 ssh myserver
 
-# Switch to appmgr
-sudo su - appmgr
+# Switch to appmgr (if needed)
+sudo -u appmgr -H bash
 
 # Clone repository
 git clone https://github.com/YOUR_ORG/infrastructure.git /opt/infrastructure
@@ -288,11 +270,11 @@ This creates Docker networks, directories, and starts Caddy.
 cd apps/n8n
 cp .env.example .env
 nano .env  # Set DOMAIN
-docker compose up -d
+sudo docker compose up -d
 
-# Portainer
-cd apps/portainer
-docker compose up -d
+#
+# Portainer:
+# Not recommended on the application VPS (Docker socket access is root-equivalent).
 ```
 
 ### 4. Update Routing
@@ -302,13 +284,13 @@ Edit `infra/reverse-proxy/Caddyfile` to add routes.
 Reload Caddy:
 ```bash
 cd infra/reverse-proxy
-docker compose restart
+sudo docker compose restart
 ```
 
 ## Structure
 
 - `infra/` - Core infrastructure (reverse proxy, monitoring)
-- `apps/` - Third-party applications (n8n, Portainer, etc.)
+- `apps/` - Third-party applications (n8n, etc.)
 - `.deploy/` - Deployment scripts
 - `docs/` - Documentation
 
@@ -336,6 +318,7 @@ See [docs/03-deploy-custom-app.md](docs/03-deploy-custom-app.md) for integration
 !.env.example
 
 # Secrets
+# (Optional local dev only; production secrets live in /var/secrets)
 secrets/
 *.key
 *.pem
@@ -390,11 +373,11 @@ git push
 
 # On server, pull changes
 ssh myserver
-sudo su - appmgr
+sudo -u appmgr -H bash
 cd /opt/infrastructure
 git pull
 cd infra/reverse-proxy
-docker compose restart
+sudo docker compose restart
 ```
 
 ## Benefits

@@ -10,6 +10,8 @@ services:
     image: caddy:2-alpine
     container_name: caddy
     restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
 
     # =================================================================
     # Security Hardening (2025 Standards)
@@ -20,7 +22,10 @@ services:
       - ALL
     cap_add:
       - NET_BIND_SERVICE  # Required to bind to ports 80 and 443
-    read_only: false  # Caddy needs to write data (certs, config)
+    read_only: true  # Root FS is immutable; writable paths are mounted volumes
+    tmpfs:
+      - /tmp:size=64M,mode=1777
+    pids_limit: 100
 
     # =================================================================
     # Resource Limits (Prevent abuse)
@@ -58,7 +63,8 @@ services:
     # Ports (HTTP only - tunnel handles HTTPS)
     # =================================================================
     ports:
-      - "80:80"
+      # Bind to localhost only to prevent origin IP bypass and Docker/UFW surprises.
+      - "127.0.0.1:80:80"
       # Optional: Enable if you want direct HTTPS access (not recommended with tunnel)
       # - "443:443"
       # - "443:443/udp"  # HTTP/3 (QUIC)
@@ -80,10 +86,17 @@ services:
     # Networks
     # =================================================================
     networks:
+      # Dedicated origin network so Caddy can reject container-to-container bypasses.
+      # Cloudflared talks to Caddy via the published localhost port; the source IP
+      # as seen by Caddy will be this bridge gateway (see Caddyfile tunnel_only).
+      # IMPORTANT: keep this network FIRST; Docker NAT for published ports targets the
+      # container IP on the first attached network (which makes remote_ip predictable).
+      - caddy-origin
       - dev-web
       - staging-web
       - prod-web
-      # Uncomment if you want Caddy metrics in Prometheus
+      # Uncomment if you want to expose internal monitoring targets via Caddy
+      # (e.g. node-exporter / docker metrics proxy in infra/monitoring-agent).
       # - monitoring
 
 # =================================================================
@@ -99,6 +112,13 @@ volumes:
 # Networks (External - created via scripts/create-networks.sh)
 # =================================================================
 networks:
+  caddy-origin:
+    # Create once via ./scripts/create-networks.sh (recommended).
+    # This is a fixed-subnet internal network used only so Caddy can reliably
+    # detect "host -> published localhost port -> container" traffic and reject
+    # container-to-container bypasses.
+    external: true
+    name: hosting-caddy-origin
   dev-web:
     external: true
   staging-web:

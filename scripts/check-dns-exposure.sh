@@ -51,6 +51,8 @@ get_domain() {
 
   if [ -n "${1:-}" ]; then
     domain="$1"
+  elif [ -f "/opt/vm-config/setup.conf" ]; then
+    domain=$(grep "^DOMAIN=" /opt/vm-config/setup.conf 2>/dev/null | cut -d'=' -f2 | tr -d '"' || echo "")
   elif [ -f "/opt/hosting-blueprint/.env" ]; then
     domain=$(grep "^DOMAIN=" /opt/hosting-blueprint/.env | cut -d'=' -f2 | tr -d '"' || echo "")
   fi
@@ -58,7 +60,7 @@ get_domain() {
   if [ -z "$domain" ]; then
     print_error "Domain not specified!"
     print_info "Usage: $0 [domain]"
-    print_info "Or ensure DOMAIN is set in /opt/hosting-blueprint/.env"
+    print_info "Or ensure DOMAIN is set in /opt/vm-config/setup.conf"
     exit 1
   fi
 
@@ -93,8 +95,8 @@ query_dns_records() {
   # Check if dig is available
   if ! command -v dig &> /dev/null; then
     print_warning "dig not found, installing dnsutils..."
-    apt-get update -qq
-    apt-get install -y -qq dnsutils > /dev/null 2>&1
+    apt-get -o Dpkg::Lock::Timeout=300 -o Acquire::Retries=3 update -qq
+    apt-get -o Dpkg::Lock::Timeout=300 -o Acquire::Retries=3 install -y -qq dnsutils > /dev/null 2>&1
   fi
 
   # Common subdomains to check

@@ -13,9 +13,13 @@
 set -euo pipefail
 
 # Configuration
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
-SECRETS_DIR="${REPO_DIR}/secrets"
+SECRETS_DIR="${SECRETS_DIR:-/var/secrets}"
+SECRETS_GROUP="${SECRETS_GROUP:-hosting-secrets}"
+SECRETS_GID="${SECRETS_GID:-1999}"
+SYSTEM_SECRETS=false
+if [ "$SECRETS_DIR" = "/var/secrets" ]; then
+  SYSTEM_SECRETS=true
+fi
 
 # Colors
 GREEN='\033[0;32m'
@@ -25,6 +29,11 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 FILTER_ENV="${1:-all}"
+
+# Re-exec with sudo when listing system secrets (avoids group membership/session issues)
+if [ "$SYSTEM_SECRETS" = true ] && [ "${EUID:-0}" -ne 0 ]; then
+  exec sudo SECRETS_DIR="$SECRETS_DIR" SECRETS_GROUP="$SECRETS_GROUP" SECRETS_GID="$SECRETS_GID" "$0" "$@"
+fi
 
 # Portable stat functions for Linux/macOS compatibility
 get_file_perms() {
@@ -77,10 +86,16 @@ list_env_secrets() {
       local perms=$(get_file_perms "$file")
       local modified=$(get_file_modified "$file")
 
-      if [ "$perms" = "600" ]; then
+      if [ "$SYSTEM_SECRETS" = true ] && [ "$perms" = "640" ]; then
+        echo -e "  ${GREEN}✓${NC} ${name} (${perms}) - modified: ${modified}"
+      elif [ "$SYSTEM_SECRETS" = false ] && [ "$perms" = "600" ]; then
         echo -e "  ${GREEN}✓${NC} ${name} (${perms}) - modified: ${modified}"
       else
-        echo -e "  ${YELLOW}⚠${NC} ${name} (${perms}) - ${YELLOW}permissions should be 600${NC}"
+        if [ "$SYSTEM_SECRETS" = true ]; then
+          echo -e "  ${YELLOW}⚠${NC} ${name} (${perms}) - ${YELLOW}permissions should be 640 (root:${SECRETS_GROUP})${NC}"
+        else
+          echo -e "  ${YELLOW}⚠${NC} ${name} (${perms}) - ${YELLOW}permissions should be 600${NC}"
+        fi
       fi
       ((count++)) || true
     fi
@@ -110,4 +125,10 @@ fi
 echo "Commands:"
 echo "  Create:  ./scripts/secrets/create-secret.sh <env> <name>"
 echo "  Rotate:  ./scripts/secrets/rotate-secret.sh <env> <name>"
+if [ "$SYSTEM_SECRETS" = true ]; then
+  echo ""
+  echo "System secrets:"
+  echo "  Root: /var/secrets"
+  echo "  Group: ${SECRETS_GROUP} (GID ${SECRETS_GID})"
+fi
 echo ""

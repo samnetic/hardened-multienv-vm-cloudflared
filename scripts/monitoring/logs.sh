@@ -27,6 +27,16 @@ NC='\033[0m'
 LOG_TYPE="${1:-system}"
 ARG2="${2:-}"
 
+# Docker is root-equivalent. Prefer sudo (no docker group needed).
+# We avoid prompting for a sudo password in this script; run it with sudo if needed.
+DOCKER=(docker)
+if ! docker info &>/dev/null; then
+  DOCKER=(sudo -n docker)
+  if ! "${DOCKER[@]}" info &>/dev/null; then
+    DOCKER=()
+  fi
+fi
+
 print_header() {
   echo ""
   echo -e "${BLUE}======================================================================${NC}"
@@ -47,21 +57,30 @@ case "$LOG_TYPE" in
     ;;
 
   docker)
+    if [ "${#DOCKER[@]}" -eq 0 ]; then
+      print_header "Docker Logs"
+      echo "Docker not accessible as this user."
+      echo ""
+      echo "Run with sudo to view container logs:"
+      echo "  sudo $0 docker"
+      exit 0
+    fi
+
     if [ -n "$ARG2" ] && [ "$ARG2" != "--follow" ]; then
       # Specific container
       print_header "Logs: $ARG2"
       if [ "${3:-}" = "--follow" ]; then
-        docker logs -f --tail 100 "$ARG2"
+        "${DOCKER[@]}" logs -f --tail 100 "$ARG2"
       else
-        docker logs --tail 200 "$ARG2"
+        "${DOCKER[@]}" logs --tail 200 "$ARG2"
       fi
     else
       # All containers
       print_header "Docker Container Logs (last 20 lines each)"
 
-      for container in $(docker ps --format "{{.Names}}" 2>/dev/null); do
+      for container in $("${DOCKER[@]}" ps --format "{{.Names}}" 2>/dev/null); do
         echo -e "${CYAN}=== $container ===${NC}"
-        docker logs --tail 20 "$container" 2>&1
+        "${DOCKER[@]}" logs --tail 20 "$container" 2>&1
         echo ""
       done
 
@@ -117,12 +136,18 @@ case "$LOG_TYPE" in
 
   caddy)
     print_header "Caddy (Reverse Proxy) Logs"
-    container=$(docker ps --filter "name=caddy" --format "{{.Names}}" 2>/dev/null | head -1)
+    if [ "${#DOCKER[@]}" -eq 0 ]; then
+      echo "Docker not accessible as this user."
+      echo "Run with sudo to view container logs:"
+      echo "  sudo $0 caddy"
+      exit 0
+    fi
+    container=$("${DOCKER[@]}" ps --filter "name=caddy" --format "{{.Names}}" 2>/dev/null | head -1)
     if [ -n "$container" ]; then
       if [ "$ARG2" = "--follow" ]; then
-        docker logs -f --tail 100 "$container"
+        "${DOCKER[@]}" logs -f --tail 100 "$container"
       else
-        docker logs --tail 200 "$container"
+        "${DOCKER[@]}" logs --tail 200 "$container"
       fi
     else
       echo "Caddy container not found"
@@ -138,12 +163,18 @@ case "$LOG_TYPE" in
         journalctl -u cloudflared -n 100 --no-pager
       fi
     else
-      container=$(docker ps --filter "name=cloudflared" --format "{{.Names}}" 2>/dev/null | head -1)
+      if [ "${#DOCKER[@]}" -eq 0 ]; then
+        echo "cloudflared not found as a systemd service, and Docker is not accessible as this user."
+        echo "Run with sudo to check the cloudflared container:"
+        echo "  sudo $0 cloudflared"
+        exit 0
+      fi
+      container=$("${DOCKER[@]}" ps --filter "name=cloudflared" --format "{{.Names}}" 2>/dev/null | head -1)
       if [ -n "$container" ]; then
         if [ "$ARG2" = "--follow" ]; then
-          docker logs -f --tail 100 "$container"
+          "${DOCKER[@]}" logs -f --tail 100 "$container"
         else
-          docker logs --tail 200 "$container"
+          "${DOCKER[@]}" logs --tail 200 "$container"
         fi
       else
         echo "cloudflared not found (neither systemd service nor container)"

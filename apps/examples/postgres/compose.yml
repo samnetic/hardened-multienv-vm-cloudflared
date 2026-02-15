@@ -1,0 +1,86 @@
+# =================================================================
+# Postgres Example - Backend Only
+# =================================================================
+# - No published ports (use internal backend network)
+# - Password from file-based secrets (not env vars)
+# =================================================================
+
+services:
+  postgres:
+    image: ${IMAGE:-postgres:16.4-alpine}
+    container_name: ${APP_NAME:-postgres}-${ENVIRONMENT:-staging}
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+
+    # =================================================================
+    # Security Hardening
+    # =================================================================
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    # Postgres writes to its data dir (volume); keep rootfs immutable.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64M,mode=1777
+      - /var/run/postgresql:size=16M,mode=1777
+
+    pids_limit: 300
+
+    # =================================================================
+    # Resource Limits
+    # =================================================================
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-appdb}
+      - POSTGRES_USER=${POSTGRES_USER:-appuser}
+      - POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password
+
+    # Allow non-root container user (postgres) to read secret files
+    group_add:
+      - "1999"
+
+    env_file:
+      - .env
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - /var/secrets/${ENVIRONMENT}/postgres_password.txt:/run/secrets/postgres_password:ro
+
+    networks:
+      - ${DOCKER_NETWORK:-staging-backend}
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    logging:
+      driver: "local"
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+networks:
+  dev-backend:
+    external: true
+  staging-backend:
+    external: true
+  prod-backend:
+    external: true
+
+volumes:
+  postgres_data:
+

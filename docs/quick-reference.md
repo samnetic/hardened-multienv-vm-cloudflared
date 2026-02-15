@@ -7,57 +7,48 @@ Fast reference for common tasks on your VM.
 ```
 /opt/
 ├── hosting-blueprint/     # Template repo (setup scripts, docs)
-└── infrastructure/        # YOUR infrastructure (running services)
-    ├── infra/reverse-proxy/  # ← Caddy config here
-    └── apps/                 # ← Your apps here
+
+/srv/
+├── infrastructure/        # Your infrastructure code (Caddy, monitoring)
+└── apps/
+    ├── dev/               # Dev deployments
+    ├── staging/           # Staging deployments
+    └── production/        # Production deployments
+
+/var/
+└── secrets/               # Secrets (NOT in git)
 ```
 
 ## 🚀 First-Time Setup on Your VM
 
 ### 1. Update Template Scripts
 ```bash
-ssh sysadmin@ssh.yourdomain.com
+# From your local machine (after running scripts/setup-local-ssh.sh):
+ssh yourdomain
 cd /opt/hosting-blueprint
-git pull origin master
+git pull origin main
 ```
 
-### 2. Create Infrastructure Repo
+### 2. Initialize /srv/infrastructure (Recommended)
 ```bash
-# Create directory
-sudo mkdir -p /opt/infrastructure
-sudo chown sysadmin:sysadmin /opt/infrastructure
-
-# Copy templates
-cp -r /opt/hosting-blueprint/infra /opt/infrastructure/
-cp -r /opt/hosting-blueprint/apps /opt/infrastructure/
-cp /opt/hosting-blueprint/.gitignore /opt/infrastructure/
-
-# Initialize git
-cd /opt/infrastructure
-git init
-git add .
-git commit -m "Initial infrastructure setup"
-
-# Link to GitHub (create repo first on GitHub)
-git remote add origin https://github.com/YOUR_USERNAME/myproject-infrastructure.git
-git push -u origin main
+sudo /opt/hosting-blueprint/scripts/setup-infrastructure-repo.sh yourdomain.com
 ```
 
 ### 3. Configure Caddy with Your Domain
 ```bash
-cd /opt/infrastructure/infra/reverse-proxy
+cd /srv/infrastructure/reverse-proxy
 
 # Update domain (replace example.com with YOUR domain)
 sed -i 's/yourdomain.com/example.com/g' Caddyfile
 
 # Safely apply
-sudo /opt/hosting-blueprint/scripts/update-caddy.sh
+sudo /opt/hosting-blueprint/scripts/update-caddy.sh /srv/infrastructure/reverse-proxy
 ```
 
 ### 4. Start Caddy
 ```bash
-cd /opt/infrastructure/infra/reverse-proxy
-docker compose up -d
+cd /srv/infrastructure/reverse-proxy
+sudo docker compose up -d
 ```
 
 ## 🔧 Daily Operations
@@ -66,14 +57,14 @@ docker compose up -d
 
 ```bash
 # 1. Edit Caddyfile
-vim /opt/infrastructure/infra/reverse-proxy/Caddyfile
+vim /srv/infrastructure/reverse-proxy/Caddyfile
 
 # 2. Validate and apply (zero downtime)
-sudo /opt/hosting-blueprint/scripts/update-caddy.sh
+sudo /opt/hosting-blueprint/scripts/update-caddy.sh /srv/infrastructure/reverse-proxy
 
 # 3. Commit changes
-cd /opt/infrastructure
-git add infra/reverse-proxy/Caddyfile
+cd /srv/infrastructure
+git add reverse-proxy/Caddyfile
 git commit -m "Update Caddy config"
 git push
 ```
@@ -82,22 +73,22 @@ git push
 
 ```bash
 # Is it running?
-docker compose -f /opt/infrastructure/infra/reverse-proxy/compose.yml ps
+sudo docker compose -f /srv/infrastructure/reverse-proxy/compose.yml ps
 
 # View logs
-docker compose -f /opt/infrastructure/infra/reverse-proxy/compose.yml logs -f
+sudo docker compose -f /srv/infrastructure/reverse-proxy/compose.yml logs -f
 
 # Check errors
-docker compose -f /opt/infrastructure/infra/reverse-proxy/compose.yml logs | grep -i error
+sudo docker compose -f /srv/infrastructure/reverse-proxy/compose.yml logs | grep -i error
 ```
 
 ### Deploy New App
 
 ```bash
-cd /opt/infrastructure/apps
+cd /srv/apps/production
 
 # Copy template
-cp -r _template myapp
+cp -r /opt/hosting-blueprint/apps/_template myapp
 
 # Configure
 cd myapp
@@ -105,18 +96,18 @@ vim compose.yml  # Update service name, ports, etc.
 vim .env         # Set environment variables
 
 # Start app
-docker compose up -d
+sudo docker compose up -d
 
 # Verify
-docker compose ps
-docker compose logs -f
+sudo docker compose ps
+sudo docker compose logs -f
 ```
 
 ### Add App to Caddy
 
 ```bash
 # 1. Edit Caddyfile
-vim /opt/infrastructure/infra/reverse-proxy/Caddyfile
+vim /srv/infrastructure/reverse-proxy/Caddyfile
 
 # Add:
 http://myapp.yourdomain.com {
@@ -127,7 +118,7 @@ http://myapp.yourdomain.com {
 }
 
 # 2. Apply changes
-sudo /opt/hosting-blueprint/scripts/update-caddy.sh
+sudo /opt/hosting-blueprint/scripts/update-caddy.sh /srv/infrastructure/reverse-proxy
 ```
 
 ### Add DNS in Cloudflare
@@ -163,31 +154,31 @@ sudo ufw status
 
 ### List Running Containers
 ```bash
-docker ps
+sudo docker ps
 ```
 
 ### View All Networks
 ```bash
-docker network ls
+sudo docker network ls
 ```
 
 ### Check Resource Usage
 ```bash
-docker stats --no-stream
+sudo docker stats --no-stream
 ```
 
 ### Clean Up Unused Images
 ```bash
-docker system prune -a
+sudo docker system prune -a
 ```
 
 ### Restart All Services
 ```bash
 # Reverse proxy
-docker compose -f /opt/infrastructure/infra/reverse-proxy/compose.yml restart
+sudo docker compose -f /srv/infrastructure/reverse-proxy/compose.yml restart
 
 # Specific app
-docker compose -f /opt/infrastructure/apps/myapp/compose.yml restart
+sudo docker compose -f /srv/apps/production/myapp/compose.yml restart
 ```
 
 ## 📝 Common Caddy Configurations
@@ -239,26 +230,26 @@ http://old.yourdomain.com {
 ### Manual Backup
 ```bash
 # Backup Caddyfile
-cp /opt/infrastructure/infra/reverse-proxy/Caddyfile \
-   /opt/infrastructure/infra/reverse-proxy/Caddyfile.backup
+cp /srv/infrastructure/reverse-proxy/Caddyfile \
+   /srv/infrastructure/reverse-proxy/Caddyfile.backup
 ```
 
 ### View Auto Backups
 ```bash
-ls -lt /opt/infrastructure/infra/reverse-proxy/backups/
+ls -lt /srv/infrastructure/reverse-proxy/backups/
 ```
 
 ### Restore Backup
 ```bash
 # Find backup
-ls /opt/infrastructure/infra/reverse-proxy/backups/
+ls /srv/infrastructure/reverse-proxy/backups/
 
 # Restore (replace TIMESTAMP)
-cp /opt/infrastructure/infra/reverse-proxy/backups/Caddyfile.YYYYMMDD_HHMMSS \
-   /opt/infrastructure/infra/reverse-proxy/Caddyfile
+cp /srv/infrastructure/reverse-proxy/backups/Caddyfile.YYYYMMDD_HHMMSS \
+   /srv/infrastructure/reverse-proxy/Caddyfile
 
 # Apply
-sudo /opt/hosting-blueprint/scripts/update-caddy.sh
+sudo /opt/hosting-blueprint/scripts/update-caddy.sh /srv/infrastructure/reverse-proxy
 ```
 
 ## 🌐 DNS Configuration
@@ -278,11 +269,11 @@ Your current setup should have:
 ### View Logs
 ```bash
 # Caddy access logs
-docker compose -f /opt/infrastructure/infra/reverse-proxy/compose.yml \
+sudo docker compose -f /srv/infrastructure/reverse-proxy/compose.yml \
   exec caddy cat /data/logs/production-access.log | tail -50
 
 # App logs
-docker compose -f /opt/infrastructure/apps/myapp/compose.yml logs -f
+sudo docker compose -f /srv/apps/production/myapp/compose.yml logs -f
 ```
 
 ### System Resources
@@ -303,12 +294,12 @@ uptime
 
 1. **Check Docker container:**
    ```bash
-   docker ps | grep myapp
+   sudo docker ps | grep myapp
    ```
 
 2. **Check Caddy config:**
    ```bash
-   docker compose -f /opt/infrastructure/infra/reverse-proxy/compose.yml logs | grep myapp
+   sudo docker compose -f /srv/infrastructure/reverse-proxy/compose.yml logs | grep myapp
    ```
 
 3. **Check DNS:**
@@ -325,19 +316,19 @@ uptime
 
 1. **Check syntax:**
    ```bash
-   docker run --rm \
-     -v /opt/infrastructure/infra/reverse-proxy/Caddyfile:/etc/caddy/Caddyfile:ro \
-     caddy:latest caddy validate --config /etc/caddy/Caddyfile
+   sudo docker run --rm --network none \
+     -v /srv/infrastructure/reverse-proxy/Caddyfile:/etc/caddy/Caddyfile:ro \
+     caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
    ```
 
 2. **View error logs:**
    ```bash
-   docker compose -f /opt/infrastructure/infra/reverse-proxy/compose.yml logs
+   sudo docker compose -f /srv/infrastructure/reverse-proxy/compose.yml logs
    ```
 
 3. **Restore backup:**
    ```bash
-   ls /opt/infrastructure/infra/reverse-proxy/backups/
+   ls /srv/infrastructure/reverse-proxy/backups/
    # Copy most recent working backup
    ```
 
@@ -369,7 +360,7 @@ uptime
 ## 🔗 Quick Links
 
 - **Cloudflare Dashboard:** https://dash.cloudflare.com
-- **GitHub Repo:** https://github.com/samnetic/hardened-multienv-vm
+- **GitHub Repo:** https://github.com/samnetic/hardened-multienv-vm-cloudflared
 - **Caddy Docs:** https://caddyserver.com/docs/
 
 ## 💡 Pro Tips

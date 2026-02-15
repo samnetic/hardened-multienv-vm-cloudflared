@@ -37,7 +37,7 @@
 SSH to your VM and run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm/main/bootstrap.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/main/bootstrap.sh | sudo bash
 ```
 
 That's it! The script will:
@@ -53,7 +53,9 @@ That's it! The script will:
 
 - Domain name (e.g., `yourdomain.com`)
 - SSH public keys (paste from your local machine)
+- Sysadmin sudo mode (password required recommended vs passwordless)
 - Timezone (defaults to UTC)
+- Cloudflare Tunnel setup (yes/no)
 
 ---
 
@@ -99,12 +101,29 @@ That's it! The script will:
 
 ## 🔧 Usage
 
-### Deploy Third-Party Apps
+### Deploy Third-Party Apps (Wizard)
 
 ```bash
-cd /opt/hosting-blueprint/apps/n8n
-docker compose up -d
+./scripts/post-setup-wizard.sh
 ```
+
+### Deploy From Template
+
+```bash
+sudo mkdir -p /srv/apps/staging
+sudo cp -r /opt/hosting-blueprint/apps/_template /srv/apps/staging/myapp
+cd /srv/apps/staging/myapp
+sudo docker compose up -d
+```
+
+### Use Included Examples
+
+Examples live under `apps/examples/` (copy into `/srv/apps/<env>/`):
+
+- `apps/examples/hello-world`
+- `apps/examples/simple-api`
+- `apps/examples/python-fastapi`
+- `apps/examples/postgres`
 
 ### Deploy Custom Apps
 
@@ -120,7 +139,7 @@ docker compose up -d
 ```bash
 # After setup completes
 ssh yourdomain      # Connects as sysadmin
-ssh yourdomain-appmgr  # Connects as appmgr (for CI/CD)
+ssh yourdomain-appmgr "hosting status dev"  # appmgr is CI-only (restricted)
 ```
 
 ---

@@ -23,23 +23,23 @@ ssh myserver
 ssh -o ProxyCommand="cloudflared access ssh --hostname ssh.yourdomain.com" sysadmin@ssh.yourdomain.com
 
 # Check system status
-docker ps                                    # All containers
+sudo docker ps                                    # All containers
 sudo systemctl status cloudflared            # Tunnel status
-cd /opt/hosting-blueprint/infra/reverse-proxy && docker compose ps  # Caddy status
+cd /opt/hosting-blueprint/infra/reverse-proxy && sudo docker compose ps  # Caddy status
 
 # View logs
-docker compose logs -f                       # Current directory
+sudo docker compose logs -f                       # Current directory
 sudo journalctl -u cloudflared -f            # Tunnel logs
 sudo ufw status verbose                      # Firewall rules
 
 # Deploy/Update app (CI/CD deploys to /srv/apps/)
 cd /srv/apps/production/my-app
-docker compose pull
-docker compose up -d
+sudo docker compose pull
+sudo docker compose up -d
 
 # Restart services
-docker compose restart                       # Current app
-docker compose restart caddy                 # In reverse-proxy dir
+sudo docker compose restart                       # Current app
+sudo docker compose restart caddy                 # In reverse-proxy dir
 sudo systemctl restart cloudflared           # Tunnel
 
 # Check systemd auto-start services
@@ -69,10 +69,10 @@ sudo systemctl status docker-compose@staging
 
 3. **Deploy:**
    ```bash
-   docker compose pull  # or build
-   docker compose up -d
-   docker compose ps
-   docker compose logs -f
+   sudo docker compose pull  # or build
+   sudo docker compose up -d
+   sudo docker compose ps
+   sudo docker compose logs -f
    ```
 
 4. **Add to Caddy:**
@@ -93,7 +93,7 @@ sudo systemctl status docker-compose@staging
 
    Restart:
    ```bash
-   docker compose restart caddy
+   sudo docker compose restart caddy
    ```
 
 5. **Test:**
@@ -107,14 +107,14 @@ sudo systemctl status docker-compose@staging
 cd apps/my-app
 
 # Pull latest image
-docker compose pull
+sudo docker compose pull
 
 # Restart with new image (zero-downtime if health checks configured)
-docker compose up -d
+sudo docker compose up -d
 
 # Verify
-docker compose ps
-docker compose logs --tail=50
+sudo docker compose ps
+sudo docker compose logs --tail=50
 ```
 
 ### Rollback App
@@ -134,11 +134,11 @@ git reset --hard <commit-hash>
 git reset --hard HEAD~1
 
 # Restart containers with previous version
-docker compose pull
-docker compose up -d
+sudo docker compose pull
+sudo docker compose up -d
 
 # Verify
-docker compose ps
+sudo docker compose ps
 ```
 
 **Option 2: Docker image tag rollback**
@@ -153,7 +153,7 @@ docker images | grep my-app
 nano compose.yml  # Change image: my-app:v1.0.1
 
 # Deploy
-docker compose up -d
+sudo docker compose up -d
 ```
 
 **Option 3: Quick rollback using git reflog**
@@ -167,7 +167,7 @@ git reflog
 # Restore to specific reflog entry
 git reset --hard HEAD@{2}
 
-docker compose up -d
+sudo docker compose up -d
 ```
 
 ---
@@ -178,19 +178,19 @@ docker compose up -d
 
 ```bash
 # All logs
-docker compose logs
+sudo docker compose logs
 
 # Follow logs
-docker compose logs -f
+sudo docker compose logs -f
 
 # Last 100 lines
-docker compose logs --tail=100
+sudo docker compose logs --tail=100
 
 # Specific service
-docker compose logs -f app
+sudo docker compose logs -f app
 
 # Since timestamp
-docker compose logs --since 2024-01-01T10:00:00
+sudo docker compose logs --since 2024-01-01T10:00:00
 ```
 
 ### View System Logs
@@ -213,11 +213,11 @@ sudo journalctl -u fail2ban -f
 
 ```bash
 # Container resource usage
-docker stats
+sudo docker stats
 
 # Disk usage
 df -h
-docker system df -v
+sudo docker system df -v
 
 # Memory usage
 free -h
@@ -233,11 +233,11 @@ htop
 cd infra/reverse-proxy
 
 # View logs
-docker compose exec caddy tail -f /data/logs/staging-access.log
-docker compose exec caddy tail -f /data/logs/production-access.log
+sudo docker compose exec caddy tail -f /data/logs/staging-access.log
+sudo docker compose exec caddy tail -f /data/logs/production-access.log
 
 # Parse JSON logs
-docker compose exec caddy cat /data/logs/production-access.log | jq .
+sudo docker compose exec caddy cat /data/logs/production-access.log | jq .
 ```
 
 ---
@@ -255,49 +255,49 @@ sudo journalctl -u cloudflared --since "5 minutes ago"
 **Check Caddy:**
 ```bash
 cd infra/reverse-proxy
-docker compose ps
-docker compose logs caddy --tail=50
+sudo docker compose ps
+sudo docker compose logs caddy --tail=50
 ```
 
 **Check app:**
 ```bash
 cd apps/my-app
-docker compose ps
-docker compose logs --tail=50
+sudo docker compose ps
+sudo docker compose logs --tail=50
 ```
 
 **Test connectivity:**
 ```bash
 # From Caddy to app
 cd infra/reverse-proxy
-docker compose exec caddy wget -O- http://app-staging:80
+sudo docker compose exec caddy wget -O- http://app-staging:80
 ```
 
 ### Container Keeps Restarting
 
 ```bash
 # Check logs
-docker compose logs app
+sudo docker compose logs app
 
 # Check health
-docker inspect app-staging | grep -A 20 Health
+sudo docker inspect app-staging | grep -A 20 Health
 
 # Test health endpoint manually
-docker compose exec app wget -O- http://localhost:3000/health
+sudo docker compose exec app wget -O- http://localhost:3000/health
 ```
 
 ### High Memory Usage
 
 ```bash
 # Find container using most memory
-docker stats --no-stream | sort -k4 -h
+sudo docker stats --no-stream | sort -k4 -h
 
 # Restart specific container
-docker compose restart app
+sudo docker compose restart app
 
 # Adjust resource limits in compose.yml
 nano compose.yml  # Update deploy.resources.limits
-docker compose up -d
+sudo docker compose up -d
 ```
 
 ### Disk Space Full
@@ -305,16 +305,16 @@ docker compose up -d
 ```bash
 # Check disk usage
 df -h
-docker system df
+sudo docker system df
 
 # Clean up
-docker system prune -a --volumes
+sudo docker system prune -a --volumes
 # WARNING: Removes unused containers, images, volumes
 
 # Safe cleanup (keep running containers)
-docker image prune -a
-docker volume prune
-docker builder prune
+sudo docker image prune -a
+sudo docker volume prune
+sudo docker builder prune
 ```
 
 ### DNS Not Resolving
@@ -364,8 +364,8 @@ for app in /opt/hosting-blueprint/apps/*/; do
   cd "$app"
   if [ -f compose.yml ]; then
     echo "Updating $(basename $app)..."
-    docker compose pull
-    docker compose up -d
+    sudo docker compose pull
+    sudo docker compose up -d
   fi
 done
 ```
@@ -392,14 +392,14 @@ cd apps/my-app
 nano .env  # Update secrets
 
 # Restart app to load new secrets
-docker compose up -d --force-recreate
+sudo docker compose up -d --force-recreate
 ```
 
 ### Clean Up Old Images
 
 ```bash
 # Remove unused images
-docker image prune -a
+sudo docker image prune -a
 
 # Remove specific old tags
 docker rmi my-app:v1.0.0
@@ -481,13 +481,13 @@ Warnings appear in:
 ```bash
 # Stop app
 cd apps/my-app
-docker compose down
+sudo docker compose down
 
 # Backup volumes
 sudo tar -czf /tmp/my-app-backup-$(date +%Y%m%d).tar.gz ./data
 
 # Restart app
-docker compose up -d
+sudo docker compose up -d
 
 # Move backup off-server
 scp /tmp/my-app-backup-*.tar.gz backup-server:/backups/
@@ -497,10 +497,10 @@ scp /tmp/my-app-backup-*.tar.gz backup-server:/backups/
 
 ```bash
 # List volumes
-docker volume ls
+sudo docker volume ls
 
 # Backup specific volume
-docker run --rm \
+sudo docker run --rm \
   -v my-app-data:/data \
   -v /tmp:/backup \
   alpine tar -czf /backup/volume-backup.tar.gz /data
@@ -511,13 +511,13 @@ docker run --rm \
 ```bash
 # Stop app
 cd apps/my-app
-docker compose down
+sudo docker compose down
 
 # Extract backup
 sudo tar -xzf /tmp/my-app-backup-20241201.tar.gz -C ./
 
 # Start app
-docker compose up -d
+sudo docker compose up -d
 ```
 
 ---
@@ -545,8 +545,8 @@ sudo fail2ban-client status sshd
 
 ```bash
 # Check security settings
-docker inspect app-staging | jq '.[0].HostConfig.SecurityOpt'
-docker inspect app-staging | jq '.[0].HostConfig.CapDrop'
+sudo docker inspect app-staging | jq '.[0].HostConfig.SecurityOpt'
+sudo docker inspect app-staging | jq '.[0].HostConfig.CapDrop'
 
 # Check running as root (should be non-root)
 docker top app-staging
@@ -558,7 +558,7 @@ Certificates are managed by Cloudflare. If using direct HTTPS with Caddy:
 
 ```bash
 cd infra/reverse-proxy
-docker compose restart caddy  # Caddy auto-renews
+sudo docker compose restart caddy  # Caddy auto-renews
 ```
 
 ---
@@ -576,14 +576,14 @@ docker compose restart caddy  # Caddy auto-renews
 2. **Check Caddy:**
    ```bash
    cd infra/reverse-proxy
-   docker compose ps
-   docker compose restart
+   sudo docker compose ps
+   sudo docker compose restart
    ```
 
 3. **Check apps:**
    ```bash
-   docker ps -a
-   docker compose up -d  # In each app directory
+   sudo docker ps -a
+   sudo docker compose up -d  # In each app directory
    ```
 
 ### Rollback All Apps
@@ -597,8 +597,8 @@ for app in /opt/hosting-blueprint/apps/*/; do
   if [ -f compose.yml ]; then
     echo "Rolling back $(basename $app)..."
     # Pull previous tag or use git to checkout previous version
-    docker compose down
-    docker compose up -d
+    sudo docker compose down
+    sudo docker compose up -d
   fi
 done
 EOF
@@ -612,12 +612,12 @@ chmod +x /tmp/rollback.sh
 ```bash
 # Stop specific app
 cd apps/problematic-app
-docker compose down
+sudo docker compose down
 
 # Or remove from Caddy
 cd infra/reverse-proxy
 nano Caddyfile  # Comment out app block
-docker compose restart caddy
+sudo docker compose restart caddy
 ```
 
 ---
@@ -628,10 +628,10 @@ docker compose restart caddy
 
 ```bash
 # Check container stats
-docker stats --no-stream
+sudo docker stats --no-stream
 
 # Check restart count
-docker ps -a --format "table {{.Names}}\t{{.Status}}"
+sudo docker ps -a --format "table {{.Names}}\t{{.Status}}"
 ```
 
 ### Optimize Images
@@ -680,7 +680,7 @@ cd apps/production-app
 nano .env  # Change to ENVIRONMENT=production, DOCKER_NETWORK=prod-web
 
 # Deploy
-docker compose up -d
+sudo docker compose up -d
 
 # Add to Caddy (production block)
 # Restart Caddy
@@ -693,7 +693,7 @@ After upgrading VM (more CPU/RAM):
 ```bash
 # Update resource limits in compose files
 # Restart containers to apply new limits
-docker compose up -d --force-recreate
+sudo docker compose up -d --force-recreate
 ```
 
 ---
@@ -704,7 +704,7 @@ docker compose up -d --force-recreate
 
 ```bash
 # All containers running
-docker ps
+sudo docker ps
 
 # Tunnel connected
 sudo systemctl status cloudflared
@@ -713,7 +713,7 @@ sudo systemctl status cloudflared
 df -h
 
 # No container restarts
-docker ps --format "table {{.Names}}\t{{.Status}}"
+sudo docker ps --format "table {{.Names}}\t{{.Status}}"
 ```
 
 ### Weekly Checks
@@ -723,7 +723,7 @@ docker ps --format "table {{.Names}}\t{{.Status}}"
 sudo apt update && sudo apt upgrade -y
 
 # Clean unused Docker resources
-docker system prune -f
+sudo docker system prune -f
 
 # Review logs for errors
 sudo journalctl --since "7 days ago" | grep -i error

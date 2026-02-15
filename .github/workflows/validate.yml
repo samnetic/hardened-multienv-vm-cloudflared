@@ -1,0 +1,38 @@
+# =================================================================
+# Validate (static checks)
+# =================================================================
+# Purpose: catch obvious regressions before they hit a VPS.
+#
+# This intentionally avoids heavyweight scanners and focuses on:
+# - bash syntax
+# - YAML parseability
+# - Python bytecode compile
+# =================================================================
+
+name: Validate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y python3-yaml
+
+      - name: Run static validation
+        run: |
+          set -euo pipefail
+          ./scripts/dev/validate-repo.sh
+
