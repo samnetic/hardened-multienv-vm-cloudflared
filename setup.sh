@@ -139,8 +139,11 @@ Usage:
   sudo ./setup.sh [--force]
 
 Options:
-  --force   Re-run setup even if it was marked complete. Uses the saved config/state.
+  --force   Re-run full setup even if already complete. Uses saved config/state.
   --help    Show this help.
+
+If setup is already complete, running without --force shows an interactive
+post-setup menu for optional tasks (appmgr key, SOPS, security tools, etc).
 EOF
 }
 
@@ -1176,6 +1179,213 @@ print_next_steps() {
 }
 
 # =================================================================
+# Post-Setup Menu
+# =================================================================
+
+post_setup_menu() {
+  # Load saved config
+  if ! load_saved_config; then
+    print_error "Cannot load saved configuration from $CONFIG_FILE"
+    print_info "Run './setup.sh --force' to re-run full setup."
+    exit 1
+  fi
+
+  while true; do
+    # Detect status of each optional item
+    local appmgr_status sops_status sectools_status tmp_status tunnel_status
+    if [ -s /home/appmgr/.ssh/authorized_keys ] 2>/dev/null; then
+      appmgr_status="${GREEN}configured${NC}"
+    else
+      appmgr_status="${YELLOW}not configured${NC}"
+    fi
+    if command -v sops &>/dev/null && command -v age &>/dev/null; then
+      sops_status="${GREEN}installed${NC}"
+    else
+      sops_status="${YELLOW}not installed${NC}"
+    fi
+    if command -v lynis &>/dev/null; then
+      sectools_status="${GREEN}installed${NC}"
+    else
+      sectools_status="${YELLOW}not installed${NC}"
+    fi
+    if findmnt -n -o FSTYPE /tmp 2>/dev/null | grep -q tmpfs; then
+      tmp_status="${GREEN}done${NC}"
+    else
+      tmp_status="${YELLOW}not done${NC}"
+    fi
+    if [ -f /etc/hosting-blueprint/tunnel-only.enabled ] 2>/dev/null; then
+      tunnel_status="${GREEN}finalized${NC}"
+    else
+      tunnel_status="${YELLOW}not finalized${NC}"
+    fi
+
+    # GitHub repos status
+    local gh_status_parts=()
+    if command -v gh &>/dev/null; then
+      gh_status_parts+=("gh:${GREEN}ok${NC}")
+    else
+      gh_status_parts+=("gh:${YELLOW}missing${NC}")
+    fi
+    if command -v gh &>/dev/null && su - "$ORIGINAL_USER" -c "gh auth status" &>/dev/null 2>&1; then
+      gh_status_parts+=("auth:${GREEN}ok${NC}")
+    else
+      gh_status_parts+=("auth:${YELLOW}no${NC}")
+    fi
+    if [ -d /srv/infrastructure/.git ] && su - "$ORIGINAL_USER" -c "cd /srv/infrastructure && git remote get-url origin" &>/dev/null 2>&1; then
+      gh_status_parts+=("infra:${GREEN}pushed${NC}")
+    else
+      gh_status_parts+=("infra:${YELLOW}local${NC}")
+    fi
+    local gh_combined
+    gh_combined="$(IFS=' | '; echo "${gh_status_parts[*]}")"
+
+    echo ""
+    echo -e "${BLUE}======================================================================${NC}"
+    echo -e "${BLUE}${BOLD} Post-Setup Menu${NC}"
+    echo -e "${BLUE}======================================================================${NC}"
+    echo ""
+    echo -e " Domain:  ${BOLD}${DOMAIN:-unknown}${NC}"
+    echo -e " Profile: ${BOLD}${SETUP_PROFILE:-unknown}${NC}"
+    echo ""
+    echo -e "  1) Set up appmgr SSH key      [${appmgr_status}]"
+    echo -e "  2) Local SSH via Tunnel        (instructions for your machine)"
+    echo -e "  3) SOPS + age encryption       [${sops_status}]"
+    echo -e "  4) Security tools (Lynis, etc) [${sectools_status}]"
+    echo -e "  5) Harden /tmp                 [${tmp_status}]"
+    echo -e "  6) Finalize tunnel lockdown    [${tunnel_status}]"
+    echo -e "  7) Post-setup wizard"
+    echo -e "  8) Verify setup"
+    echo -e "  9) Re-run full setup (--force)"
+    echo -e " 10) GitHub repos setup          [${gh_combined}]"
+    echo -e "  0) Exit"
+    echo ""
+    read -rp "Choose an option [0]: " menu_choice
+    menu_choice="${menu_choice:-0}"
+
+    case "$menu_choice" in
+      1)
+        echo ""
+        if [ -s /home/appmgr/.ssh/authorized_keys ] 2>/dev/null; then
+          print_info "appmgr already has an authorized key:"
+          echo "  $(head -c 80 /home/appmgr/.ssh/authorized_keys)..."
+          echo ""
+          if ! confirm "Replace the existing key?" "n"; then
+            continue
+          fi
+        fi
+        echo "Paste the SSH public key for the appmgr (CI/CD) user."
+        echo "Expected format: ssh-ed25519 AAAA... comment"
+        echo ""
+        read -rp "Appmgr SSH Key: " new_appmgr_key
+        if [ -z "$new_appmgr_key" ]; then
+          print_warning "No key entered, skipping."
+          continue
+        fi
+        if ! validate_ssh_key "$new_appmgr_key"; then
+          print_error "Invalid SSH key format."
+          echo "Expected prefixes: ssh-ed25519, sk-ssh-ed25519@openssh.com, ssh-rsa, ecdsa-sha2-*, sk-ecdsa-sha2-nistp256@openssh.com"
+          continue
+        fi
+        # Install the key
+        mkdir -p /home/appmgr/.ssh
+        echo "restrict $new_appmgr_key" > /home/appmgr/.ssh/authorized_keys
+        chmod 700 /home/appmgr/.ssh
+        chmod 600 /home/appmgr/.ssh/authorized_keys
+        chown -R appmgr:appmgr /home/appmgr/.ssh
+        print_success "appmgr SSH key installed."
+        ;;
+      2)
+        echo ""
+        local ssh_domain="ssh.${DOMAIN:-yourdomain.com}"
+        print_header "Local SSH via Cloudflare Tunnel"
+        echo "Run these commands on your ${BOLD}local machine${NC} (not this VM):"
+        echo ""
+        echo -e "  ${CYAN}# Option A: Download and run directly${NC}"
+        echo "  curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/HEAD/scripts/setup-local-ssh.sh | bash -s -- $ssh_domain sysadmin"
+        echo ""
+        echo -e "  ${CYAN}# Option B: Download, review, then run${NC}"
+        echo "  wget https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/HEAD/scripts/setup-local-ssh.sh"
+        echo "  chmod +x setup-local-ssh.sh"
+        echo "  ./setup-local-ssh.sh $ssh_domain sysadmin"
+        echo ""
+        print_info "This installs cloudflared on your machine and configures SSH over the tunnel."
+        echo ""
+        read -rp "Press Enter to return to the menu..." _
+        ;;
+      3)
+        echo ""
+        if [ -x "$SCRIPT_DIR/scripts/security/setup-sops-age.sh" ]; then
+          "$SCRIPT_DIR/scripts/security/setup-sops-age.sh"
+        else
+          print_error "Script not found: scripts/security/setup-sops-age.sh"
+        fi
+        ;;
+      4)
+        echo ""
+        if [ -x "$SCRIPT_DIR/scripts/security/setup-security-tools.sh" ]; then
+          "$SCRIPT_DIR/scripts/security/setup-security-tools.sh"
+        else
+          print_error "Script not found: scripts/security/setup-security-tools.sh"
+        fi
+        ;;
+      5)
+        echo ""
+        if [ -x "$SCRIPT_DIR/scripts/security/enable-tmpfs-tmp.sh" ]; then
+          "$SCRIPT_DIR/scripts/security/enable-tmpfs-tmp.sh"
+        else
+          print_error "Script not found: scripts/security/enable-tmpfs-tmp.sh"
+        fi
+        ;;
+      6)
+        echo ""
+        if [ -x "$SCRIPT_DIR/scripts/finalize-tunnel.sh" ]; then
+          "$SCRIPT_DIR/scripts/finalize-tunnel.sh" "${DOMAIN:-}"
+        else
+          print_error "Script not found: scripts/finalize-tunnel.sh"
+        fi
+        ;;
+      7)
+        echo ""
+        if [ -x "$SCRIPT_DIR/scripts/post-setup-wizard.sh" ]; then
+          "$SCRIPT_DIR/scripts/post-setup-wizard.sh"
+        else
+          print_error "Script not found: scripts/post-setup-wizard.sh"
+        fi
+        ;;
+      8)
+        echo ""
+        if [ -x "$SCRIPT_DIR/scripts/verify-setup.sh" ]; then
+          "$SCRIPT_DIR/scripts/verify-setup.sh"
+        else
+          print_error "Script not found: scripts/verify-setup.sh"
+        fi
+        ;;
+      9)
+        echo ""
+        print_info "Re-running full setup with --force..."
+        exec "$0" --force
+        ;;
+      10)
+        echo ""
+        if [ -x "$SCRIPT_DIR/scripts/setup-github-repos.sh" ]; then
+          "$SCRIPT_DIR/scripts/setup-github-repos.sh"
+        else
+          print_error "Script not found: scripts/setup-github-repos.sh"
+        fi
+        ;;
+      0)
+        echo ""
+        print_info "Goodbye."
+        exit 0
+        ;;
+      *)
+        print_warning "Invalid choice: $menu_choice"
+        ;;
+    esac
+  done
+}
+
+# =================================================================
 # Main
 # =================================================================
 
@@ -1199,25 +1409,23 @@ main() {
   done
 
   # Check if setup is already complete
-  if [ "$FORCE" = false ] && { [ -f "$COMPLETE_FILE" ] || [ -f "$LEGACY_COMPLETE_FILE" ]; }; then
+  if [ -f "$COMPLETE_FILE" ] || [ -f "$LEGACY_COMPLETE_FILE" ]; then
     # Migrate legacy marker to the new location (config dir) if needed.
     if [ ! -f "$COMPLETE_FILE" ]; then
       mkdir -p "$CONFIG_DIR"
       touch "$COMPLETE_FILE"
       chmod 600 "$COMPLETE_FILE" 2>/dev/null || true
     fi
-    print_header "Setup Already Complete"
-    echo ""
-    print_warning "This VM has already been set up."
-    print_info "Configuration: $CONFIG_FILE"
-    print_info "State: $STATE_FILE"
-    echo ""
-    print_info "If you want to:"
-    echo "  • Re-run specific steps: Check scripts/ directory"
-    echo "  • Verify setup: ./scripts/verify-setup.sh"
-    echo "  • Start fresh: Delete $CONFIG_DIR (includes state + completion marker)"
-    echo ""
-    exit 0
+
+    if [ "$FORCE" = true ]; then
+      # --force: fall through to the full re-run flow below
+      :
+    else
+      # No --force: show interactive post-setup menu
+      post_setup_menu
+      # post_setup_menu exits on its own; this is a safety fallback
+      exit 0
+    fi
   fi
 
   print_header "Hardened Multi-Environment VPS Setup"
