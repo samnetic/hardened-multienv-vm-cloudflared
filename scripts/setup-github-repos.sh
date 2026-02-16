@@ -682,6 +682,34 @@ scaffold_deployments_repo() {
         return 1
         ;;
     esac
+  else
+    # Directory doesn't exist — offer to clone or scaffold fresh
+    echo ""
+    echo "Options:"
+    echo "  1) Scaffold a new deployments repo"
+    echo "  2) Clone an existing GitHub repo"
+    echo "  3) Skip"
+    echo ""
+    read -rp "Choice [1]: " new_deploy_choice
+    new_deploy_choice="${new_deploy_choice:-1}"
+
+    case "$new_deploy_choice" in
+      1)
+        print_info "Creating fresh scaffold..."
+        ;;
+      2)
+        clone_into_directory "$DEPLOY_DIR" || return 1
+        return 0
+        ;;
+      3)
+        print_info "Skipping."
+        return 0
+        ;;
+      *)
+        print_error "Invalid choice: $new_deploy_choice"
+        return 1
+        ;;
+    esac
   fi
 
   # Create directory and scaffold files
