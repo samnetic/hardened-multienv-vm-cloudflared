@@ -1298,7 +1298,7 @@ post_setup_menu() {
         echo ""
         local ssh_domain="ssh.${DOMAIN:-yourdomain.com}"
         print_header "Local SSH via Cloudflare Tunnel"
-        echo "Run these commands on your ${BOLD}local machine${NC} (not this VM):"
+        echo -e "Run these commands on your ${BOLD}local machine${NC} (not this VM):"
         echo ""
         echo -e "  ${CYAN}# Option A: Download and run directly${NC}"
         echo "  curl -fsSL https://raw.githubusercontent.com/samnetic/hardened-multienv-vm-cloudflared/HEAD/scripts/setup-local-ssh.sh | bash -s -- $ssh_domain sysadmin"
