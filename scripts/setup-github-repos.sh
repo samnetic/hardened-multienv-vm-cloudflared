@@ -164,6 +164,139 @@ derive_repo_slug() {
   echo "$1" | tr '.' '-'
 }
 
+# Clone an existing GitHub repo into a target directory.
+# Backs up existing contents, clones, then merges back non-git files.
+clone_into_directory() {
+  local target_dir="$1"
+
+  if ! is_gh_authenticated; then
+    print_error "Not authenticated with GitHub. Run step 2 first."
+    return 1
+  fi
+
+  echo ""
+  print_info "Enter the GitHub repo (e.g. owner/repo-name or full URL):"
+  read -rp "Repository: " repo_input
+  if [ -z "$repo_input" ]; then
+    print_error "No repository specified."
+    return 1
+  fi
+
+  # Normalize: strip https://github.com/ prefix if given
+  repo_input="${repo_input#https://github.com/}"
+  repo_input="${repo_input%.git}"
+
+  # Verify repo exists
+  if ! su - "$ORIGINAL_USER" -c "gh repo view '$repo_input'" &>/dev/null; then
+    print_error "Repository '$repo_input' not found or not accessible."
+    return 1
+  fi
+
+  # If target has files, back them up and merge after clone
+  local had_files=false
+  local backup_dir=""
+  if [ -d "$target_dir" ] && [ "$(ls -A "$target_dir" 2>/dev/null)" ]; then
+    had_files=true
+    backup_dir="${target_dir}.pre-clone.$(date +%s)"
+    print_step "Backing up existing files to $backup_dir..."
+    mv "$target_dir" "$backup_dir"
+  elif [ -d "$target_dir" ]; then
+    rmdir "$target_dir"
+  fi
+
+  print_step "Cloning $repo_input into $target_dir..."
+  ensure_git_identity || return 1
+  if ! su - "$ORIGINAL_USER" -c "gh repo clone '$repo_input' '$target_dir'"; then
+    print_error "Clone failed."
+    # Restore backup if we moved files
+    if [ "$had_files" = true ] && [ -d "$backup_dir" ]; then
+      mv "$backup_dir" "$target_dir"
+      print_info "Restored original files."
+    fi
+    return 1
+  fi
+  print_success "Cloned $repo_input into $target_dir"
+
+  # Merge back non-git files from backup (don't overwrite cloned files)
+  if [ "$had_files" = true ] && [ -d "$backup_dir" ]; then
+    print_step "Merging back local files that aren't in the repo..."
+    local count=0
+    while IFS= read -r -d '' file; do
+      local rel="${file#$backup_dir/}"
+      if [ ! -e "$target_dir/$rel" ]; then
+        local dest_dir
+        dest_dir="$(dirname "$target_dir/$rel")"
+        mkdir -p "$dest_dir"
+        cp -a "$file" "$target_dir/$rel"
+        count=$((count + 1))
+      fi
+    done < <(find "$backup_dir" -not -path '*/.git/*' -not -name '.git' -type f -print0)
+    if [ "$count" -gt 0 ]; then
+      print_success "Merged $count local file(s) into cloned repo"
+      print_info "Backup kept at: $backup_dir (delete when satisfied)"
+    else
+      print_info "No extra local files to merge. Backup at: $backup_dir"
+    fi
+  fi
+
+  chown -R "$ORIGINAL_USER:$ORIGINAL_USER" "$target_dir"
+  return 0
+}
+
+# Ensure the original user has git user.name and user.email configured.
+# Pulls from gh auth if available, otherwise prompts.
+ensure_git_identity() {
+  local has_name has_email
+  has_name="$(su - "$ORIGINAL_USER" -c "git config --global user.name" 2>/dev/null || echo "")"
+  has_email="$(su - "$ORIGINAL_USER" -c "git config --global user.email" 2>/dev/null || echo "")"
+
+  if [ -n "$has_name" ] && [ -n "$has_email" ]; then
+    return 0
+  fi
+
+  print_warning "Git identity not configured for $ORIGINAL_USER."
+
+  # Try to auto-detect from gh auth
+  local gh_name gh_email
+  gh_name="$(su - "$ORIGINAL_USER" -c "gh api user -q .name" 2>/dev/null || echo "")"
+  gh_email="$(su - "$ORIGINAL_USER" -c "gh api user -q .email" 2>/dev/null || echo "")"
+  # GitHub may return null for private emails; use noreply
+  if [ -z "$gh_email" ] || [ "$gh_email" = "null" ]; then
+    local gh_login gh_id
+    gh_login="$(get_gh_user)"
+    gh_id="$(su - "$ORIGINAL_USER" -c "gh api user -q .id" 2>/dev/null || echo "")"
+    if [ -n "$gh_id" ] && [ -n "$gh_login" ]; then
+      gh_email="${gh_id}+${gh_login}@users.noreply.github.com"
+    fi
+  fi
+  if [ -z "$gh_name" ] || [ "$gh_name" = "null" ]; then
+    gh_name="$(get_gh_user)"
+  fi
+
+  if [ -n "$gh_name" ] && [ -n "$gh_email" ]; then
+    print_info "Auto-detected from GitHub: $gh_name <$gh_email>"
+    if confirm "Use this identity for git commits?" "y"; then
+      su - "$ORIGINAL_USER" -c "git config --global user.name '$gh_name'"
+      su - "$ORIGINAL_USER" -c "git config --global user.email '$gh_email'"
+      print_success "Git identity configured"
+      return 0
+    fi
+  fi
+
+  # Manual fallback
+  echo ""
+  local input_name input_email
+  read -rp "Git user name: " input_name
+  read -rp "Git user email: " input_email
+  if [ -z "$input_name" ] || [ -z "$input_email" ]; then
+    print_error "Name and email are required for git commits."
+    return 1
+  fi
+  su - "$ORIGINAL_USER" -c "git config --global user.name '$input_name'"
+  su - "$ORIGINAL_USER" -c "git config --global user.email '$input_email'"
+  print_success "Git identity configured"
+}
+
 get_age_public_key() {
   if [ -f "$AGE_KEY_FILE" ]; then
     age-keygen -y "$AGE_KEY_FILE" 2>/dev/null || echo ""
@@ -347,13 +480,31 @@ push_infra_repo() {
 
   # Verify infra repo exists
   if [ ! -d "$INFRA_DIR" ]; then
-    print_error "$INFRA_DIR does not exist."
-    print_info "Run the main setup first to create the infrastructure directory."
-    return 1
+    print_warning "$INFRA_DIR does not exist."
+    if confirm "Clone an existing GitHub repo into $INFRA_DIR?" "y"; then
+      clone_into_directory "$INFRA_DIR" || return 1
+    else
+      print_info "Create it first with the main setup or manually."
+      return 1
+    fi
   fi
   if [ ! -d "$INFRA_DIR/.git" ]; then
     print_warning "$INFRA_DIR exists but is not a git repository."
-    if confirm "Initialize git repo now?" "y"; then
+    echo ""
+    echo "Options:"
+    echo "  1) Initialize a new git repo here"
+    echo "  2) Clone an existing GitHub repo into $INFRA_DIR"
+    echo "  3) Skip"
+    echo ""
+    read -rp "Choice [1]: " init_choice
+    init_choice="${init_choice:-1}"
+
+    if [ "$init_choice" = "3" ]; then
+      print_info "Skipping."
+      return 0
+    elif [ "$init_choice" = "2" ]; then
+      clone_into_directory "$INFRA_DIR" || return 1
+    elif [ "$init_choice" = "1" ]; then
       # Fix ownership so the user can read all files
       chown -R "$ORIGINAL_USER:$ORIGINAL_USER" "$INFRA_DIR"
       # Ensure .gitignore exists to exclude secrets
@@ -368,6 +519,7 @@ push_infra_repo() {
 GIEOF
         chown "$ORIGINAL_USER:$ORIGINAL_USER" "$INFRA_DIR/.gitignore"
       fi
+      ensure_git_identity || return 1
       print_step "Initializing git repository in $INFRA_DIR..."
       if ! su - "$ORIGINAL_USER" -c "cd $INFRA_DIR && git init && git add . && git commit -m 'Initial infrastructure for ${DOMAIN:-unknown}'"; then
         print_error "Git initialization failed. Check permissions: ls -la $INFRA_DIR"
@@ -488,8 +640,9 @@ scaffold_deployments_repo() {
     echo ""
     echo "Options:"
     echo "  1) Reuse existing (keep current files)"
-    echo "  2) Backup and overwrite"
-    echo "  3) Skip"
+    echo "  2) Clone an existing GitHub repo (merges local files)"
+    echo "  3) Backup and overwrite with fresh scaffold"
+    echo "  4) Skip"
     echo ""
     read -rp "Choice [1]: " deploy_choice
     deploy_choice="${deploy_choice:-1}"
@@ -499,12 +652,16 @@ scaffold_deployments_repo() {
         print_info "Reusing existing $DEPLOY_DIR"
         ;;
       2)
+        clone_into_directory "$DEPLOY_DIR" || return 1
+        return 0
+        ;;
+      3)
         local backup="$DEPLOY_DIR.backup.$(date +%s)"
         print_step "Backing up to $backup"
         mv "$DEPLOY_DIR" "$backup"
         print_success "Backup created"
         ;;
-      3)
+      4)
         print_info "Skipping."
         return 0
         ;;
@@ -672,8 +829,12 @@ README_EOF
 
   # Init git if needed
   if [ ! -d "$DEPLOY_DIR/.git" ]; then
+    ensure_git_identity || return 1
     print_step "Initializing git repository..."
-    su - "$ORIGINAL_USER" -c "cd $DEPLOY_DIR && git init && git add . && git commit -m 'Initial deployments scaffold for ${DOMAIN:-unknown}'"
+    if ! su - "$ORIGINAL_USER" -c "cd $DEPLOY_DIR && git init && git add . && git commit -m 'Initial deployments scaffold for ${DOMAIN:-unknown}'"; then
+      print_error "Git initialization failed."
+      return 1
+    fi
     print_success "Git repository initialized"
   fi
 
