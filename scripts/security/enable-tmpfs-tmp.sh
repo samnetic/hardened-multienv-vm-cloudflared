@@ -91,14 +91,51 @@ echo "This will clear /tmp on reboot, and may break installers that execute from
 echo "If something breaks, disable with: sudo $0 --disable"
 echo ""
 
-mkdir -p /etc/systemd/system/tmp.mount.d
-cat > /etc/systemd/system/tmp.mount.d/override.conf <<EOF
+# Some Ubuntu versions mask or omit tmp.mount entirely.
+# Unmask first so enable/start can succeed.
+systemctl unmask tmp.mount >/dev/null 2>&1 || true
+
+# If the base unit doesn't exist at all, create it.
+if ! systemctl cat tmp.mount >/dev/null 2>&1; then
+  echo "tmp.mount unit not found — creating it..."
+  cat > /etc/systemd/system/tmp.mount <<EOF
+[Unit]
+Description=Temporary Directory /tmp
+Documentation=man:hier(7)
+ConditionPathIsSymbolicLink=!/tmp
+DefaultDependencies=no
+Conflicts=umount.target
+Before=local-fs.target umount.target
+After=swap.target
+
+[Mount]
+What=tmpfs
+Where=/tmp
+Type=tmpfs
+Options=mode=1777,strictatime,nosuid,nodev,noexec,size=${SIZE}
+
+[Install]
+WantedBy=local-fs.target
+EOF
+else
+  # Unit exists — use a drop-in override for mount options
+  mkdir -p /etc/systemd/system/tmp.mount.d
+  cat > /etc/systemd/system/tmp.mount.d/override.conf <<EOF
 [Mount]
 Options=mode=1777,strictatime,nosuid,nodev,noexec,size=${SIZE}
 EOF
+fi
 
 systemctl daemon-reload
-systemctl enable --now tmp.mount
+if ! systemctl enable --now tmp.mount 2>&1; then
+  echo ""
+  echo "WARNING: tmp.mount failed to start. This is non-critical."
+  echo "Your system may use /etc/fstab or another mechanism for /tmp."
+  echo "You can try manually: sudo systemctl start tmp.mount"
+  echo "Or add to /etc/fstab:  tmpfs /tmp tmpfs nosuid,nodev,noexec,size=${SIZE} 0 0"
+  echo ""
+  exit 0
+fi
 
 echo ""
 echo "Verify:"
