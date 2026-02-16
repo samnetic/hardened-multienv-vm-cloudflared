@@ -1060,24 +1060,24 @@ print_next_steps() {
   echo ""
   echo -e "${YELLOW}⚠️  IMPORTANT: Run the verification script!${NC}"
   echo ""
-  echo "1. ${BOLD}Verify Setup & Test SSH${NC}"
+  echo -e "1. ${BOLD}Verify Setup & Test SSH${NC}"
   echo "   ./scripts/verify-setup.sh"
-  echo "   ${CYAN}(This will guide you through SSH testing and user management)${NC}"
+  echo -e "   ${CYAN}(This will guide you through SSH testing and user management)${NC}"
   echo ""
 
   if [ "$SETUP_CLOUDFLARED" = "yes" ]; then
-    echo "2. ${BOLD}Configure Cloudflare Tunnel${NC}"
+    echo -e "2. ${BOLD}Configure Cloudflare Tunnel${NC}"
     echo "   - Add DNS CNAME records in Cloudflare dashboard"
     echo "   - Point subdomains to your tunnel"
     echo ""
   else
-    echo "2. ${BOLD}Set Up Cloudflare Tunnel${NC}"
+    echo -e "2. ${BOLD}Set Up Cloudflare Tunnel${NC}"
     echo "   ./scripts/install-cloudflared.sh"
     echo ""
   fi
 
   if [ "${SETUP_PROFILE:-full-stack}" = "full-stack" ]; then
-    echo "3. ${BOLD}Create Your First App${NC}"
+    echo -e "3. ${BOLD}Create Your First App${NC}"
     echo "   sudo mkdir -p /srv/apps/staging"
     echo "   sudo cp -r /opt/hosting-blueprint/apps/_template /srv/apps/staging/myapp"
     echo "   cd /srv/apps/staging/myapp"
@@ -1085,35 +1085,35 @@ print_next_steps() {
     echo "   sudo docker compose --compatibility up -d"
     echo ""
 
-    echo "4. ${BOLD}Create Secrets${NC}"
+    echo -e "4. ${BOLD}Create Secrets${NC}"
     echo "   ./scripts/secrets/create-secret.sh dev db_password"
     echo "   ./scripts/secrets/create-secret.sh staging db_password"
     echo "   ./scripts/secrets/create-secret.sh production db_password"
     echo ""
   elif [ "${SETUP_PROFILE:-full-stack}" = "monitoring" ]; then
-    echo "3. ${BOLD}Deploy Monitoring Stack${NC}"
+    echo -e "3. ${BOLD}Deploy Monitoring Stack${NC}"
     echo "   cd /srv/services/monitoring"
     echo "   # Edit .env (set GRAFANA_DOMAIN, etc.)"
     echo "   sudo docker compose --compatibility up -d"
     echo ""
 
-    echo "4. ${BOLD}Add Subdomain Routes${NC}"
+    echo -e "4. ${BOLD}Add Subdomain Routes${NC}"
     echo "   sudo /opt/hosting-blueprint/scripts/add-subdomain.sh"
     echo "   # Example: route grafana.yourdomain.com to grafana:3000"
     echo ""
   else
-    echo "3. ${BOLD}Add Services${NC}"
+    echo -e "3. ${BOLD}Add Services${NC}"
     echo "   Place compose files in /srv/services/<name>/"
     echo "   sudo docker compose --compatibility up -d"
     echo ""
 
-    echo "4. ${BOLD}Add Subdomain Routes${NC}"
+    echo -e "4. ${BOLD}Add Subdomain Routes${NC}"
     echo "   sudo /opt/hosting-blueprint/scripts/add-subdomain.sh"
     echo "   # Routes a subdomain to a container through the reverse proxy"
     echo ""
   fi
 
-  echo "5. ${BOLD}Protect Admin Panels (Zero Trust)${NC}"
+  echo -e "5. ${BOLD}Protect Admin Panels (Zero Trust)${NC}"
   echo "   - Go to Cloudflare Zero Trust dashboard"
   echo "   - Access > Applications > Add self-hosted app"
   echo "   - See docs/14-cloudflare-zero-trust.md for full guide"
