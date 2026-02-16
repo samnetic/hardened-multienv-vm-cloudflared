@@ -251,8 +251,10 @@ authenticate_gh() {
   fi
 
   print_step "Launching GitHub authentication..."
-  print_info "This uses the device code flow (works on headless VMs)."
-  print_info "You'll see a URL and code to enter in your browser."
+  echo ""
+  print_info "This uses the device code flow (works on headless servers)."
+  print_info "You'll see a one-time code below."
+  print_info "Open ${BOLD}https://github.com/login/device${NC} in your browser and enter the code."
   echo ""
 
   # Run auth as the original user (not root)
@@ -350,9 +352,15 @@ push_infra_repo() {
     return 1
   fi
   if [ ! -d "$INFRA_DIR/.git" ]; then
-    print_error "$INFRA_DIR is not a git repository."
-    print_info "Initialize it first: cd $INFRA_DIR && git init && git add . && git commit -m 'Initial commit'"
-    return 1
+    print_warning "$INFRA_DIR exists but is not a git repository."
+    if confirm "Initialize git repo now?" "y"; then
+      print_step "Initializing git repository in $INFRA_DIR..."
+      su - "$ORIGINAL_USER" -c "cd $INFRA_DIR && git init && git add . && git commit -m 'Initial infrastructure for ${DOMAIN:-unknown}'"
+      print_success "Git repository initialized"
+    else
+      print_info "Skipping. Initialize manually: cd $INFRA_DIR && git init && git add . && git commit -m 'Initial commit'"
+      return 1
+    fi
   fi
 
   # Check if origin remote already set
@@ -871,17 +879,17 @@ github_repos_menu() {
     choice="${choice:-0}"
 
     case "$choice" in
-      1) install_gh_cli ;;
-      2) authenticate_gh ;;
-      3) push_infra_repo ;;
+      1) install_gh_cli || true ;;
+      2) authenticate_gh || true ;;
+      3) push_infra_repo || true ;;
       4)
         if [ "${SETUP_PROFILE:-}" = "minimal" ]; then
           print_warning "Invalid choice: $choice"
         else
-          scaffold_deployments_repo
+          scaffold_deployments_repo || true
         fi
         ;;
-      5) run_all_steps ;;
+      5) run_all_steps || true ;;
       0)
         echo ""
         return 0
