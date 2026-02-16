@@ -368,7 +368,7 @@ EOF
 
   echo -e "${GREEN}Route added successfully!${NC}"
   echo ""
-  echo "  ${BOLD}https://${HOSTNAME}${NC}  →  ${CONTAINER_NAME}:${CONTAINER_PORT}"
+  echo -e "  ${BOLD}https://${HOSTNAME}${NC}  →  ${CONTAINER_NAME}:${CONTAINER_PORT}"
   echo ""
   echo -e "${CYAN}Checklist:${NC}"
   echo "  [✓] Caddyfile updated"

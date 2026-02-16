@@ -483,7 +483,7 @@ EOF
   echo ""
   if [ "$SSL_CONFIGURED" = true ]; then
     echo -e "2. ${BOLD}SSL/TLS Configuration${NC}"
-    echo "   ${GREEN}✓ Configured automatically!${NC}"
+    echo -e "   ${GREEN}✓ Configured automatically!${NC}"
     echo "     • Full mode enabled"
     echo "     • Always Use HTTPS enabled"
     echo "     • Automatic HTTPS Rewrites enabled"

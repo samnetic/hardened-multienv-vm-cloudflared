@@ -345,8 +345,8 @@ print_header "Production VM Setup - Security Hardened Installation"
 
 if [ "$DRY_RUN" = true ]; then
   echo -e "${YELLOW}======================================================================"
-  echo " DRY-RUN MODE - No changes will be made"
-  echo "======================================================================${NC}"
+  echo -e " DRY-RUN MODE - No changes will be made"
+  echo -e "======================================================================${NC}"
   echo ""
   echo "This preview shows what would be configured:"
   echo ""
@@ -1378,8 +1378,8 @@ print_header "Setup Complete!"
 
 if [ "$DRY_RUN" = true ]; then
   echo -e "${YELLOW}======================================================================"
-  echo " DRY-RUN COMPLETE - No changes were made"
-  echo "======================================================================${NC}"
+  echo -e " DRY-RUN COMPLETE - No changes were made"
+  echo -e "======================================================================${NC}"
   echo ""
   echo "This was a dry-run preview. To execute the setup, run:"
   echo "  sudo $0"

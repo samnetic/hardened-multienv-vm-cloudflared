@@ -481,9 +481,9 @@ main() {
   echo ""
 
   print_info "Your DNS configuration:"
-  echo "  • A records pointing to VM IP: ${GREEN}NONE${NC}"
-  echo "  • CNAME records pointing to tunnel: ${GREEN}ACTIVE${NC}"
-  echo "  • All traffic routed through: ${GREEN}Cloudflare${NC}"
+  echo -e "  • A records pointing to VM IP: ${GREEN}NONE${NC}"
+  echo -e "  • CNAME records pointing to tunnel: ${GREEN}ACTIVE${NC}"
+  echo -e "  • All traffic routed through: ${GREEN}Cloudflare${NC}"
   echo ""
 
   print_info "Test your setup:"
