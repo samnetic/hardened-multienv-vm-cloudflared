@@ -204,9 +204,15 @@ clone_into_directory() {
     rmdir "$target_dir"
   fi
 
-  print_step "Cloning $repo_input into $target_dir..."
+  # Clone into a temp dir first (sysadmin can't create dirs under /srv/)
+  local tmp_clone
+  tmp_clone="$(mktemp -d)"
+  chown "$ORIGINAL_USER:$ORIGINAL_USER" "$tmp_clone"
+
+  print_step "Cloning $repo_input..."
   ensure_git_identity || return 1
-  if ! su - "$ORIGINAL_USER" -c "gh repo clone '$repo_input' '$target_dir'"; then
+  if ! su - "$ORIGINAL_USER" -c "gh repo clone '$repo_input' '$tmp_clone/repo'"; then
+    rm -rf "$tmp_clone"
     print_error "Clone failed."
     # Restore backup if we moved files
     if [ "$had_files" = true ] && [ -d "$backup_dir" ]; then
@@ -215,6 +221,12 @@ clone_into_directory() {
     fi
     return 1
   fi
+  # Move cloned repo to target location
+  mkdir -p "$target_dir"
+  # Copy contents (including hidden files like .git)
+  cp -a "$tmp_clone/repo/." "$target_dir/"
+  rm -rf "$tmp_clone"
+  chown -R "$ORIGINAL_USER:$ORIGINAL_USER" "$target_dir"
   print_success "Cloned $repo_input into $target_dir"
 
   # Merge back non-git files from backup (don't overwrite cloned files)
