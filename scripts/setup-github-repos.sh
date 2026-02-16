@@ -354,8 +354,25 @@ push_infra_repo() {
   if [ ! -d "$INFRA_DIR/.git" ]; then
     print_warning "$INFRA_DIR exists but is not a git repository."
     if confirm "Initialize git repo now?" "y"; then
+      # Fix ownership so the user can read all files
+      chown -R "$ORIGINAL_USER:$ORIGINAL_USER" "$INFRA_DIR"
+      # Ensure .gitignore exists to exclude secrets
+      if [ ! -f "$INFRA_DIR/.gitignore" ]; then
+        cat > "$INFRA_DIR/.gitignore" << 'GIEOF'
+.env
+.env.*
+!.env.*.enc
+!.env.example
+*.pem
+*.key
+GIEOF
+        chown "$ORIGINAL_USER:$ORIGINAL_USER" "$INFRA_DIR/.gitignore"
+      fi
       print_step "Initializing git repository in $INFRA_DIR..."
-      su - "$ORIGINAL_USER" -c "cd $INFRA_DIR && git init && git add . && git commit -m 'Initial infrastructure for ${DOMAIN:-unknown}'"
+      if ! su - "$ORIGINAL_USER" -c "cd $INFRA_DIR && git init && git add . && git commit -m 'Initial infrastructure for ${DOMAIN:-unknown}'"; then
+        print_error "Git initialization failed. Check permissions: ls -la $INFRA_DIR"
+        return 1
+      fi
       print_success "Git repository initialized"
     else
       print_info "Skipping. Initialize manually: cd $INFRA_DIR && git init && git add . && git commit -m 'Initial commit'"
