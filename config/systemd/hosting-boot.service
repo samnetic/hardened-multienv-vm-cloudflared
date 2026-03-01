@@ -1,0 +1,31 @@
+# =================================================================
+# hosting-boot.service - Start all Docker Compose services on boot
+# =================================================================
+# Ensures Docker networks exist, decrypts secrets (if SOPS is available),
+# and starts all compose services in the correct order.
+#
+# Install:
+#   sudo cp config/systemd/hosting-boot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable hosting-boot.service
+# =================================================================
+
+[Unit]
+Description=Initialize Docker networks and start all hosting services
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=sysadmin
+Group=sysadmin
+WorkingDirectory=/srv
+ExecStart=/opt/scripts/hosting-boot.sh
+TimeoutStartSec=300
+
+# Pass SOPS key location if secrets encryption is used
+Environment=SOPS_AGE_KEY_FILE=/etc/sops/age/keys.txt
+
+[Install]
+WantedBy=multi-user.target

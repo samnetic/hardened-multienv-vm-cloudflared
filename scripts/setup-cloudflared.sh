@@ -278,6 +278,7 @@ ingress:
   - service: http://localhost:80
 
 protocol: quic
+post-quantum: true
 loglevel: info
 EOF
 

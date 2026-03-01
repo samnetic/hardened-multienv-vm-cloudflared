@@ -33,9 +33,9 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# Repository configuration
-REPO_URL="https://github.com/samnetic/hardened-multienv-vm-cloudflared.git"
-REPO_DIR="/opt/hosting-blueprint"
+# Repository configuration (override with environment variables)
+REPO_URL="${REPO_URL:-https://github.com/samnetic/hardened-multienv-vm-cloudflared.git}"
+REPO_DIR="${REPO_DIR:-/opt/hosting-blueprint}"
 
 # For interactive prompts when the script is run via a pipe (curl | sudo bash),
 # stdin is the script body. Read prompts from /dev/tty instead.

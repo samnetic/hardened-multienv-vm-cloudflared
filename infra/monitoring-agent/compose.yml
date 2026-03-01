@@ -36,6 +36,8 @@ services:
       - "--web.listen-address=:9100"
       # Reduce noise; keep it simple and safe.
       - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|run)($$|/)"
+      # Enable textfile collector for custom metrics (AIDE, Trivy, fail2ban, backups)
+      - "--collector.textfile.directory=/host/var/lib/prometheus/node-exporter"
 
     networks:
       - monitoring

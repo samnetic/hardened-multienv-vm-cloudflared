@@ -57,8 +57,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 # fail2ban status check (daily 7:00 AM)
 0 7 * * * root /usr/bin/fail2ban-client status >> /var/log/fail2ban-daily.log 2>&1
 
-# Check for zombie processes (daily 8:00 AM)
-0 8 * * * root ps aux | awk '$8 ~ /^Z/ { print }' | logger -t zombie-check
+# Check for zombie processes with alerting (daily 8:00 AM)
+0 8 * * * root test -x /opt/scripts/hosting-check-zombies.sh && /opt/scripts/hosting-check-zombies.sh
 
 # ===========================================
 # OPTIONAL: Security Auditing
@@ -83,6 +83,19 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
 # Configuration backup (weekly Sunday 6:00 AM) - create this script or customize
 # 0 6 * * 0 root /opt/scripts/backup-configs.sh >> /var/log/backup.log 2>&1
+
+# ===========================================
+# PROMETHEUS METRICS COLLECTION
+# ===========================================
+
+# fail2ban metrics (every minute)
+* * * * * root test -x /opt/scripts/hosting-fail2ban-metrics.sh && /opt/scripts/hosting-fail2ban-metrics.sh >/dev/null 2>&1
+
+# Backup status metrics (every 15 minutes)
+*/15 * * * * root test -x /opt/scripts/hosting-backup-metrics.sh && /opt/scripts/hosting-backup-metrics.sh >/dev/null 2>&1
+
+# AIDE metrics (after daily check, 04:15 - runs after the 04:00 check)
+15 4 * * * root test -x /opt/scripts/hosting-aide-metrics.sh && /opt/scripts/hosting-aide-metrics.sh >/dev/null 2>&1
 
 # ===========================================
 # CLEANUP OLD LOG FILES

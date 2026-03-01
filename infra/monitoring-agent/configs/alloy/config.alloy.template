@@ -1,0 +1,123 @@
+// =================================================================
+// Grafana Alloy Configuration (hosting-blueprint)
+// =================================================================
+// Discovers Docker container logs and ships them to a remote Loki
+// instance. Also ships host security logs (audit + auth).
+//
+// Environment variables (set in compose):
+//   LOKI_URL       - Loki push endpoint
+//   LOKI_USERNAME  - Basic auth username (optional)
+//   LOKI_PASSWORD  - Basic auth password (optional)
+// =================================================================
+
+// -----------------------------------------------------------------
+// Docker Container Log Discovery
+// -----------------------------------------------------------------
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// Extract useful labels from Docker metadata
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "compose_service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_image"]
+    target_label  = "image"
+  }
+}
+
+// Collect Docker logs
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  forward_to = [loki.process.pipeline.receiver]
+}
+
+// -----------------------------------------------------------------
+// Log Processing Pipeline
+// -----------------------------------------------------------------
+loki.process "pipeline" {
+  // Drop health-check noise
+  stage.drop {
+    expression = "(?i)(healthz|/metrics|ping|GET / HTTP)"
+    drop_counter_reason = "healthcheck_noise"
+  }
+
+  // Try to parse JSON logs (common with Docker json-file driver)
+  stage.json {
+    expressions = {
+      level   = "level",
+      msg     = "msg",
+      message = "message",
+    }
+  }
+
+  // Normalize log level label
+  stage.labels {
+    values = {
+      level = "",
+    }
+  }
+
+  forward_to = [loki.write.monitoring.receiver]
+}
+
+// -----------------------------------------------------------------
+// Host Security Logs
+// -----------------------------------------------------------------
+
+// Audit log (auditd)
+local.file_match "audit_logs" {
+  path_targets = [{
+    __path__ = "/host-logs/audit/audit.log",
+    job      = "audit",
+    source   = "host",
+  }]
+}
+
+loki.source.file "audit" {
+  targets    = local.file_match.audit_logs.targets
+  forward_to = [loki.write.monitoring.receiver]
+}
+
+// Auth log (SSH, sudo, PAM)
+local.file_match "auth_logs" {
+  path_targets = [{
+    __path__ = "/host-logs/auth.log",
+    job      = "auth",
+    source   = "host",
+  }]
+}
+
+loki.source.file "auth" {
+  targets    = local.file_match.auth_logs.targets
+  forward_to = [loki.write.monitoring.receiver]
+}
+
+// -----------------------------------------------------------------
+// Loki Remote Write
+// -----------------------------------------------------------------
+loki.write "monitoring" {
+  endpoint {
+    url = env("LOKI_URL")
+
+    basic_auth {
+      username = env("LOKI_USERNAME")
+      password = env("LOKI_PASSWORD")
+    }
+  }
+}

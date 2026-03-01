@@ -1106,6 +1106,11 @@ EOF
 	  docker --version
 	  docker compose version
 
+  # Create Prometheus textfile collector directory (used by node-exporter for custom metrics)
+  print_step "Creating Prometheus textfile collector directory..."
+  install -d -m 0755 /var/lib/prometheus/node-exporter
+  print_success "Created /var/lib/prometheus/node-exporter (textfile collector)"
+
   # Create deployment directories based on server profile
   SETUP_PROFILE="${SETUP_PROFILE:-full-stack}"
   print_step "Creating deployment directories (profile: ${SETUP_PROFILE})..."

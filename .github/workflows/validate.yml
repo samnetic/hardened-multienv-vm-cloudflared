@@ -31,6 +31,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python3-yaml shellcheck
 
+      - name: Shellcheck (hard requirement)
+        run: |
+          set -euo pipefail
+          echo "==> shellcheck: top-level scripts"
+          shellcheck -x setup.sh bootstrap.sh
+
+          echo "==> shellcheck: scripts/"
+          find scripts -type f -name '*.sh' -print0 | xargs -0 shellcheck -x
+
+          echo "==> shellcheck: config/bin shell wrappers"
+          for f in config/bin/hosting-ci-ssh config/bin/hosting-cloudflared-upgrade; do
+            if [ -f "$f" ]; then
+              shellcheck -x "$f"
+            fi
+          done
+          echo "shellcheck: all passed"
+
       - name: Run static validation
         run: |
           set -euo pipefail

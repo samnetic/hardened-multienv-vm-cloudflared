@@ -1,0 +1,7 @@
+# Caddy reverse proxy access logs (CrowdSec acquisition)
+# Auto-generated from template. Edit /etc/crowdsec/acquis.d/caddy.yaml on the host.
+filenames:
+  - __CADDY_LOG_GLOB__
+labels:
+  type: caddy
+source: file

@@ -143,16 +143,37 @@ else
       ;;
   esac
 
-  SOPS_VERSION="$(curl -fsSL https://api.github.com/repos/getsops/sops/releases/latest | grep '"tag_name"' | cut -d'"' -f4)"
-  if [ -z "$SOPS_VERSION" ]; then
-    print_error "Could not determine latest sops version from GitHub API"
-    exit 1
-  fi
+  # Pinned version for reproducible builds. Update periodically.
+  SOPS_VERSION="${SOPS_VERSION:-v3.9.4}"
+  # SHA-256 checksums for integrity verification (update when bumping version)
+  declare -A SOPS_CHECKSUMS=(
+    ["v3.9.4-amd64"]="bbc40e30dc0e0bfa6db22497e76917eab07ce8c002f12ea50c476f5a59e685db"
+    ["v3.9.4-arm64"]="19bbf76dbdb2618b4f0cfa888894d3698adabc8ae10e78a67f29e76e3cbcaee5"
+  )
+
   SOPS_URL="https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.${SOPS_ARCH}"
 
   print_info "Downloading sops ${SOPS_VERSION} for ${SOPS_ARCH}..."
-  curl -fsSL -o /usr/local/bin/sops "$SOPS_URL"
-  chmod 755 /usr/local/bin/sops
+  curl -fsSL -o /tmp/sops "$SOPS_URL"
+
+  # Verify checksum if available for this version
+  CHECKSUM_KEY="${SOPS_VERSION}-${SOPS_ARCH}"
+  if [ -n "${SOPS_CHECKSUMS[$CHECKSUM_KEY]:-}" ]; then
+    ACTUAL_CHECKSUM="$(sha256sum /tmp/sops | awk '{print $1}')"
+    if [ "$ACTUAL_CHECKSUM" != "${SOPS_CHECKSUMS[$CHECKSUM_KEY]}" ]; then
+      print_error "SOPS checksum verification failed!"
+      print_error "Expected: ${SOPS_CHECKSUMS[$CHECKSUM_KEY]}"
+      print_error "Got:      ${ACTUAL_CHECKSUM}"
+      rm -f /tmp/sops
+      exit 1
+    fi
+    print_success "Checksum verified"
+  else
+    print_warning "No pinned checksum for ${CHECKSUM_KEY}; skipping verification"
+  fi
+
+  install -m 755 /tmp/sops /usr/local/bin/sops
+  rm -f /tmp/sops
   print_success "sops ${SOPS_VERSION} installed to /usr/local/bin/sops"
 fi
 

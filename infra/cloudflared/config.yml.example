@@ -54,6 +54,9 @@ ingress:
 # Prefer QUIC (faster), fallback to HTTP/2
 protocol: quic
 
+# Post-quantum encryption for tunnel connections (Kyber, ML-KEM)
+post-quantum: true
+
 # =================================================================
 # Logging
 # =================================================================

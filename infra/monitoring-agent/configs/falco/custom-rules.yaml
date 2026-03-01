@@ -1,0 +1,70 @@
+# =================================================================
+# Custom Falco Rules - Noise Reduction (hosting-blueprint)
+# =================================================================
+# Generic noise-reduction macros and rule overrides for common
+# container patterns. Customize as needed for your workloads.
+# =================================================================
+
+# -----------------------------------------------------------------
+# Macro: Containers that legitimately need shell access
+# (Add your container names here to reduce false positives)
+# -----------------------------------------------------------------
+- macro: allowed_shell_containers
+  condition: >
+    (container.name in ("alloy", "node-exporter"))
+
+# -----------------------------------------------------------------
+# Macro: Trusted images that may read sensitive files
+# -----------------------------------------------------------------
+- macro: trusted_sensitive_readers
+  condition: >
+    (container.image.repository in ("prom/node-exporter", "grafana/alloy", "falcosecurity/falco"))
+
+# -----------------------------------------------------------------
+# Override: Terminal shell in container (reduce noise)
+# -----------------------------------------------------------------
+- rule: Terminal shell in container
+  desc: Detect shell opened in container (filtered for known patterns)
+  condition: >
+    spawned_process
+    and container
+    and shell_procs
+    and proc.tty != 0
+    and not allowed_shell_containers
+  output: >
+    Shell opened in container
+    (container=%container.name image=%container.image.repository
+     user=%user.name shell=%proc.name parent=%proc.pname
+     cmdline=%proc.cmdline terminal=%proc.tty)
+  priority: WARNING
+  tags: [container, shell, mitre_execution]
+
+# -----------------------------------------------------------------
+# Override: Read sensitive file untrusted (reduce noise)
+# -----------------------------------------------------------------
+- rule: Read sensitive file untrusted
+  desc: Sensitive file read by untrusted container
+  condition: >
+    open_read
+    and container
+    and sensitive_files
+    and not trusted_sensitive_readers
+  output: >
+    Sensitive file opened for reading in container
+    (container=%container.name image=%container.image.repository
+     user=%user.name file=%fd.name parent=%proc.pname)
+  priority: WARNING
+  tags: [container, filesystem, mitre_credential_access]
+
+# -----------------------------------------------------------------
+# Suppress: Node exporter filesystem access (expected behavior)
+# -----------------------------------------------------------------
+- rule: Node Exporter filesystem access
+  desc: Suppress false positives from node-exporter reading /host
+  condition: >
+    container.name = "node-exporter"
+    and open_read
+    and fd.name startswith "/host"
+  output: "suppressed"
+  priority: DEBUG
+  enabled: false

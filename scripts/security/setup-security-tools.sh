@@ -174,11 +174,31 @@ print_step "Installing helper scripts to /opt/scripts..."
 install -d -m 0755 /opt/scripts
 install -d -m 0755 /var/log/hosting-blueprint/security
 install -d -m 0755 /var/lib/hosting-blueprint
+install -d -m 0755 /var/lib/prometheus/node-exporter
 install -m 0755 "${REPO_DIR}/scripts/security/notify.sh" /opt/scripts/hosting-notify.sh
 install -m 0755 "${REPO_DIR}/scripts/security/aide-check.sh" /opt/scripts/hosting-aide-check.sh
 install -m 0755 "${REPO_DIR}/scripts/security/rkhunter-check.sh" /opt/scripts/hosting-rkhunter-check.sh
 install -m 0755 "${REPO_DIR}/scripts/security/lynis-audit.sh" /opt/scripts/hosting-lynis-audit.sh
 install -m 0755 "${REPO_DIR}/scripts/security/debsums-check.sh" /opt/scripts/hosting-debsums-check.sh
+
+# Monitoring/metrics scripts
+if [ -f "${REPO_DIR}/scripts/monitoring/aide-metrics.sh" ]; then
+  install -m 0755 "${REPO_DIR}/scripts/monitoring/aide-metrics.sh" /opt/scripts/hosting-aide-metrics.sh
+fi
+if [ -f "${REPO_DIR}/scripts/monitoring/fail2ban-metrics.sh" ]; then
+  install -m 0755 "${REPO_DIR}/scripts/monitoring/fail2ban-metrics.sh" /opt/scripts/hosting-fail2ban-metrics.sh
+fi
+if [ -f "${REPO_DIR}/scripts/monitoring/backup-metrics.sh" ]; then
+  install -m 0755 "${REPO_DIR}/scripts/monitoring/backup-metrics.sh" /opt/scripts/hosting-backup-metrics.sh
+fi
+
+# Maintenance scripts
+if [ -f "${REPO_DIR}/scripts/maintenance/check-zombies.sh" ]; then
+  install -m 0755 "${REPO_DIR}/scripts/maintenance/check-zombies.sh" /opt/scripts/hosting-check-zombies.sh
+fi
+if [ -f "${REPO_DIR}/scripts/maintenance/boot-services.sh" ]; then
+  install -m 0755 "${REPO_DIR}/scripts/maintenance/boot-services.sh" /opt/scripts/hosting-boot.sh
+fi
 print_success "Installed scripts under /opt/scripts"
 
 if [ -f "${CONFIG_DIR}/cron.d/security-scans" ]; then
@@ -195,13 +215,31 @@ else
   print_warning "Missing config: ${CONFIG_DIR}/logrotate.d/security-tools (skipping)"
 fi
 
-print_header "Step 4/5: Enable Services"
+print_header "Step 4/6: Enable Services"
 
 print_step "Enabling process accounting (acct)..."
 systemctl enable --now acct >/dev/null 2>&1 || true
 print_success "acct enabled"
 
-print_header "Step 5/5: Initialize Baselines (Optional)"
+# Install boot resilience service
+if [ -f "${CONFIG_DIR}/systemd/hosting-boot.service" ] && [ -x /opt/scripts/hosting-boot.sh ]; then
+  if confirm "Install boot resilience service (auto-start all Docker services on reboot)?" "y"; then
+    install -m 0644 "${CONFIG_DIR}/systemd/hosting-boot.service" /etc/systemd/system/hosting-boot.service
+    systemctl daemon-reload
+    systemctl enable hosting-boot.service
+    print_success "Boot resilience service installed and enabled"
+  fi
+fi
+
+print_header "Step 5/6: Install Cron Jobs"
+
+# Update the vm-maintenance cron with new entries
+if [ -f "${CONFIG_DIR}/cron.d/vm-maintenance" ]; then
+  install -m 0644 "${CONFIG_DIR}/cron.d/vm-maintenance" /etc/cron.d/vm-maintenance
+  print_success "Updated cron schedule: /etc/cron.d/vm-maintenance (includes metrics collection)"
+fi
+
+print_header "Step 6/6: Initialize Baselines (Optional)"
 
 if confirm "Initialize AIDE baseline now? (can take a while)" "y"; then
   print_step "Running aideinit..."

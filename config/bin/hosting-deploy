@@ -701,10 +701,35 @@ def check_required_secrets(app_dir: str, files: List[str]) -> None:
         die("Required /var/secrets/*.txt file(s) missing")
 
 
+def check_deploy_rate_limit(env_name: str, min_interval: int = 60) -> None:
+    """Reject deployments that happen too quickly (anti-abuse for compromised CI)."""
+    ts_file = os.path.join(LOG_DIR, f".deploy-{env_name}-last")
+    now = time.time()
+    if os.path.isfile(ts_file):
+        try:
+            last = float(pathlib.Path(ts_file).read_text().strip())
+            elapsed = now - last
+            if elapsed < min_interval:
+                die(
+                    f"Rate limited: last deploy to '{env_name}' was {elapsed:.0f}s ago "
+                    f"(minimum interval: {min_interval}s). "
+                    f"Remove {ts_file} to override."
+                )
+        except (ValueError, OSError):
+            pass  # Corrupt file, allow deploy
+    # Stamp the current deploy time
+    ensure_dirs()
+    pathlib.Path(ts_file).write_text(str(now))
+
+
 def deploy_env(env_name: str, ref: str | None, policy: Policy) -> None:
     root = env_dest(env_name)
     if not os.path.isdir(root):
         die(f"Deploy root not found: {root} (run sync first)")
+
+    # Rate-limit: reject rapid-fire deploys (protection against compromised CI)
+    min_deploy_interval = int(os.environ.get("DEPLOY_MIN_INTERVAL", "60"))
+    check_deploy_rate_limit(env_name, min_deploy_interval)
 
     if shutil.which("docker") is None:
         die("docker not installed")

@@ -98,6 +98,8 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
     "apps/examples/python-fastapi/compose.yml apps/examples/python-fastapi/compose.local.yml"
     "apps/examples/simple-api/compose.yml apps/examples/simple-api/compose.local.yml"
     "infra/monitoring-agent/compose.yml infra/monitoring-agent/compose.cadvisor.yml"
+    "infra/monitoring-agent/compose.yml infra/monitoring-agent/compose.alloy.yml"
+    "infra/monitoring-agent/compose.yml infra/monitoring-agent/compose.falco.yml"
   )
   for pair in "${overlays[@]}"; do
     f1="${pair%% *}"

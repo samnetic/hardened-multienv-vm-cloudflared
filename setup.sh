@@ -982,7 +982,23 @@ run_setup() {
     fi
   fi
 
-  if confirm "Harden /tmp (tmpfs + noexec,nosuid,nodev)?"; then
+  if confirm "Install CrowdSec (collaborative intrusion detection + firewall bouncer)?" "y"; then
+    if [ -x "${SCRIPT_DIR}/scripts/security/setup-crowdsec.sh" ]; then
+      bash "${SCRIPT_DIR}/scripts/security/setup-crowdsec.sh"
+    else
+      print_warning "Missing script: ${SCRIPT_DIR}/scripts/security/setup-crowdsec.sh (skipping)"
+    fi
+  fi
+
+  if confirm "Install Trivy (weekly container CVE scanning)?"; then
+    if [ -x "${SCRIPT_DIR}/scripts/security/setup-trivy.sh" ]; then
+      bash "${SCRIPT_DIR}/scripts/security/setup-trivy.sh"
+    else
+      print_warning "Missing script: ${SCRIPT_DIR}/scripts/security/setup-trivy.sh (skipping)"
+    fi
+  fi
+
+  if confirm "Harden /tmp (tmpfs + noexec,nosuid,nodev)?" "y"; then
     if [ -x "${SCRIPT_DIR}/scripts/security/enable-tmpfs-tmp.sh" ]; then
       bash "${SCRIPT_DIR}/scripts/security/enable-tmpfs-tmp.sh"
     else

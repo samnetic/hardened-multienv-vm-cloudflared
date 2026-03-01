@@ -1,0 +1,49 @@
+# =================================================================
+# Falco Container Runtime Security (Overlay Compose)
+# =================================================================
+# Detects container anomalies: shell-in-container, privilege
+# escalation, sensitive file reads, unexpected network activity.
+#
+# Merge with the base monitoring-agent compose:
+#   docker compose -f compose.yml -f compose.falco.yml up -d
+#
+# NOTE: Falco requires privileged mode for eBPF kernel tracing.
+# This is an infrastructure-level exception, not subject to
+# hosting-deploy application policy.
+# =================================================================
+
+services:
+  falco:
+    image: ${FALCO_IMAGE:-falcosecurity/falco:0.43.0}
+    container_name: falco
+    restart: unless-stopped
+    privileged: true
+
+    pid: host
+
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock:ro
+      - /proc:/host/proc:ro
+      - /etc:/host/etc:ro
+      - ./configs/falco/falco.yaml:/etc/falco/falco.yaml:ro
+      - ./configs/falco/custom-rules.yaml:/etc/falco/rules.d/custom-rules.yaml:ro
+
+    environment:
+      - HOST_ROOT=/host
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+        reservations:
+          memory: 256M
+
+    networks:
+      monitoring:
+        aliases:
+          - falco-metrics
+
+networks:
+  monitoring:
+    external: true
