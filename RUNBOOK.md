@@ -343,6 +343,29 @@ cloudflared tunnel info production-tunnel
 
 ## Maintenance Tasks
 
+### Rotate the Public IP
+
+Run from your **workstation**, never from the VM — rotation detaches the current
+IP before attaching the new one, so a session on the VM would sever itself and
+strand the instance with no public IP (see Emergency Procedures below).
+
+```bash
+# Authenticate first (~1h session, refresh with `oci session refresh`)
+oci session authenticate --region <region> --profile-name DEFAULT
+
+./scripts/maintenance/rotate-public-ip.sh --dry-run     # preflight only
+./scripts/maintenance/rotate-public-ip.sh               # rotate to a fresh IP
+./scripts/maintenance/rotate-public-ip.sh --delete-old  # and release the old one
+```
+
+Config lives in `config/ip-rotation.env` (gitignored; copy from the `.example`).
+The script refuses to run on the target instance, creates the replacement before
+detaching, rolls back on failure, and verifies egress afterwards.
+
+SSH is unaffected by rotation — it runs over the Cloudflare tunnel and never
+touches the public IP. Unassigned reserved IPs keep billing, so use
+`--delete-old` or reuse them later with `--ip <address>`.
+
 ### Update System Packages
 
 ```bash
@@ -564,6 +587,52 @@ sudo docker compose restart caddy  # Caddy auto-renews
 ---
 
 ## Emergency Procedures
+
+### Locked Out — SSH Fails Entirely
+
+`ssh <ssh-alias>` dying with `websocket: bad handshake` is generic. Get the
+real error by forcing an HTTP/1.1 WebSocket upgrade with a valid Access token:
+
+```bash
+TOK=$(cat ~/.cloudflared/ssh.yourdomain.com-*-token)
+curl -s --http1.1 -o /dev/stdout -w "\n%{http_code}\n" \
+  -H "cf-access-token: $TOK" -H "Connection: Upgrade" -H "Upgrade: websocket" \
+  -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+  https://ssh.yourdomain.com/
+```
+
+`101` = tunnel healthy (look elsewhere). `530` + `error code: 1033` = the tunnel
+has **no origin connected**, i.e. `cloudflared` on the VM can't reach Cloudflare.
+
+Most likely cause is the VNIC having no public IP. The subnet's only egress is an
+Internet Gateway, which requires a public IP for *outbound* traffic — so without
+one the VM has no internet at all, taking down the tunnel, Tailscale, and direct
+SSH simultaneously. Check without needing shell access:
+
+```bash
+oci compute instance list-vnics --instance-id <ocid> \
+  --query 'data[].{priv:"private-ip",pub:"public-ip"}'
+```
+
+If `pub` is `null`, attach one (Console: Instance → VNIC → IPv4 Addresses → Edit)
+or re-run `scripts/maintenance/rotate-public-ip.sh`. `cloudflared` reconnects on
+its own within ~30s.
+
+If the IP is present and it's still down, the **OCI serial console** is the only
+remaining way in — it uses Oracle's control plane, not the network. Create it in
+the Console with `~/.ssh/<oci-key>.key.pub`, then add to **both** the
+outer ssh and the inner `ProxyCommand`:
+
+```
+-i ~/.ssh/<oci-key>.key -o IdentitiesOnly=yes
+-o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa
+```
+
+Without the first pair you get `Permission denied (publickey)`; without the
+second, `no matching host key type found` (the endpoint only offers `ssh-rsa`).
+OCI mints a new host key per console connection, so clear stale entries with
+`ssh-keygen -R <instance-ocid>`. Needs a real TTY — a blank screen is normal,
+press Enter for a login prompt.
 
 ### Complete System Outage
 

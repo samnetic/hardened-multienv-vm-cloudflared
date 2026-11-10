@@ -64,6 +64,7 @@ Thumbs.db
 
 # Local configuration (user-specific)
 /opt/vm-config/
+config/ip-rotation.env
 
 # Plan files (local only)
 .claude/
